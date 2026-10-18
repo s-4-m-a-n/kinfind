@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% import "_tip.html" as tipui with context %}
+{% import "_save_to_account.html" as account with context %}
 {% macro tip_photo_url(pid) %}/case/{{ case.ref }}/tips/photos/{{ pid }}?k={{ k }}{% endmacro %}
 {% block title %}Case {{ case.ref }} · {{ app_name }}{% endblock %}
 {% block content %}
@@ -35,6 +36,7 @@
     <li>{{ case.features|length }} distinctive feature{{ '' if case.features|length == 1 else 's' }}</li>
     <li>{{ photos }} photo{{ '' if photos == 1 else 's' }} on file</li>
   </ul>
+  {{ account.save(case.family_id, "/case/" ~ case.ref ~ "/save", "/case/" ~ case.ref ~ "?k=" ~ k, k) }}
 </header>
 
 <section id="appeal" class="appeal-settings">

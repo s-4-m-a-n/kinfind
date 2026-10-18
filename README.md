@@ -17,22 +17,36 @@ python -m app.seed                      # demo disasters, found records and sign
 uvicorn app.main:app --reload --port 8765
 ```
 
-- Family: http://localhost:8765 → *Report a missing person*. The case page has a private link, and that link is the only way back to the case.
+- Family: http://localhost:8765 → *Report a missing person*. The case page has a private link that always opens the case. Families can also create an optional account (*Sign in*) to keep all their cases and check-ins in one place.
 - Home page: a world map of disaster zones that stays usable with thousands of them. Pins are grouped into clusters that split apart as you zoom in, and affected-area circles are drawn only once zoomed in. The map opens near the visitor, using the browser's time zone (e.g. `Asia/Kathmandu` → Kathmandu) with the closest few zones in view, so people in Nepal see Nepal's disasters first. No permission prompt is needed and nothing is sent anywhere. The lookup table `app/static/tz_coords.json` is built from the public tz database by `tools/build_tz_coords.py`. The list under the map shows the zones in the area you are looking at, nearest first, 8 at a time. A search box filters zones by place, country or type of disaster, and *Zones near me* sorts them by distance from you (your location never leaves the browser). Zones load from `/zones.json`, a compact cached feed, so the page itself stays small. `/zones` lists every zone with search and pages and works without JavaScript. Choosing a zone opens the report form with that disaster already selected, and long zone dropdowns on forms get a type-to-filter box.
 - New zones come from three places: responders add them directly, families suggest one at `/zones/new`, and the server pulls Orange and Red alerts from [GDACS](https://www.gdacs.org) every hour (`GDACS_SYNC_MINUTES`; `0` turns it off). Suggestions wait at `/responder/zones` until a responder approves, merges or rejects them. Families can report into a zone they suggested while it is still awaiting review.
 - Settings such as `OPENROUTER_API_KEY` go in a `.env` file in the project root. Copy `.env.example` to start; `.env` is git-ignored and read when the server starts.
 - Responder: http://localhost:8765/responder/login. Each responder has their own account. The demo seed adds `admin@kinfind.demo` / `kinfind-admin` and `responder@kinfind.demo` / `kinfind-responder`.
 
-## Responder accounts
+## Accounts
 
-Everything is in [app/accounts.py](app/accounts.py).
+Everything is in [app/accounts.py](app/accounts.py). Responder and family accounts are kept completely apart (separate tables, sessions and cookies), so a family account can never open a responder page.
+
+### Families (optional)
+
+- **Sign up** at `/account/signup` with an email and password, or *Continue with Google*. Nobody has to: private links keep working.
+- **My account** (`/account`) lists every report and check-in made while signed in, with their status (verification requests, sightings, public appeal). A case or check-in made before signing up is added with *Save to my account* on its private page; a case already saved to another account can't be taken over.
+- Family sessions last 30 days. Family emails are never shown to responders in the activity log.
+
+### Responders
 
 - **First admin.** Set `ADMIN_EMAIL` and `ADMIN_PASSWORD` before the first start (an admin is created only while there are no accounts), or run `python -m app.accounts create-admin --email you@example.org`.
+- **Request access** (`/responder/signup`, or *Continue with Google* on the sign-in page). The account stays switched off until an admin approves it under *Access requests* on the Team page; rejected requests can't sign in. The reply is the same whether or not the email already has an account, so emails can't be probed.
 - **Team page** (`/responder/team`, admins only). Add a responder and Kinfind makes a one-time password, shown once, for the admin to pass on privately. At first sign-in the responder must choose their own password. Admins can also reset passwords, deactivate or reactivate accounts, and make someone an admin. Admins can't change their own account there, so there is always an active admin.
 - **Sessions** last 12 hours. Signing out, changing a password, a reset or deactivation ends them. Only a hash of each session token is stored, and passwords are hashed with scrypt.
 - **Activity log** (`/responder/activity`, admins only). Records sign-ins and failed sign-ins, found people logged, match decisions, zone decisions, every missing report or found record opened (both show family contact details), and every unfiltered photo viewed. The dashboard's verification queue also shows family contacts; opening the dashboard is not logged.
-- **Password guessing.** After 5 failed sign-ins for an email within 15 minutes, sign-ins for that email are refused until the 15 minutes pass.
 - Locked out? `python -m app.accounts reset-password --email you@example.org`.
+
+### Signing in, for both
+
+- **Continue with Google** appears when `GOOGLE_CLIENT_ID` is set (an OAuth web client from the Google Cloud console). Add every address the site runs on, such as `http://localhost:8765` and the Cloud Run URL, to the client's *Authorized JavaScript origins*. The server checks each Google ID token with Google and only accepts verified emails; an existing account with the same email is linked on first use.
+- **Password guessing.** After 5 failed sign-ins for an email from one address within 15 minutes, that address is refused for that email until the 15 minutes pass (50 failures from anywhere locks the email). New accounts and access requests are limited to 5 per address per hour.
+- Sign-in and sign-up forms posted from another website are refused.
 
 Data is stored in `data/` (SQLite database + uploaded photos). Set `DISASTERLENS_DATA` to use a different folder.
 
@@ -133,7 +147,7 @@ app/static/zones.js  zones map (Leaflet + OpenStreetMap tiles)
 app/gdacs.py      suggested zones from GDACS alerts
 app/ai_match.py   AI photo check: describe -> screen -> compare
 app/safe.py       "I'm safe" check-ins: name + phone matching
-app/accounts.py   responder accounts, sessions, activity log
+app/accounts.py   responder and family accounts, Google sign-in, sessions, activity log
 app/photos.py     upload cleaning: strips GPS and other metadata, refuses huge images
 app/limits.py     rate and request-size limits
 app/sketch.py     exact pencil-sketch versions of photos

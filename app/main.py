@@ -18,6 +18,7 @@ import time
 from contextlib import asynccontextmanager
 from datetime import date, timedelta
 from pathlib import Path
+from urllib.parse import quote, urlsplit
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
@@ -115,6 +116,7 @@ def ref_links(text) -> Markup:
 
 
 templates.env.filters["ref_links"] = ref_links
+templates.env.globals["google_client_id"] = accounts.google_client_id()  # None hides "Continue with Google"
 
 
 async def _reject(scope, receive, send, status: int, message: str, headers: dict) -> None:
@@ -133,13 +135,15 @@ def is_https(scope) -> bool:
     return scope.get("scheme") == "https" or proto.split(",")[0].strip() == "https"
 
 
-# Map tiles and Leaflet are the only things loaded from elsewhere. Inline scripts and styles are
-# still used by the templates, hence 'unsafe-inline'.
+# Map tiles, Leaflet and Google's sign-in button are the only things loaded from elsewhere.
+# Inline scripts and styles are still used by the templates, hence 'unsafe-inline'.
+GSI = "https://accounts.google.com/gsi/"
 CSP = "; ".join([
-    "default-src 'self'", "script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com",
-    "style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com",
+    "default-src 'self'", f"script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com {GSI}client",
+    f"style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com {GSI}style",
     "img-src 'self' data: blob: https://tile.openstreetmap.org https://cdnjs.cloudflare.com",
-    "connect-src 'self'", "object-src 'none'", "base-uri 'self'", "form-action 'self'", "frame-ancestors 'none'"])
+    f"connect-src 'self' {GSI}", f"frame-src {GSI}", "object-src 'none'", "base-uri 'self'",
+    "form-action 'self'", "frame-ancestors 'none'"])
 SECURITY_HEADERS = {
     "Content-Security-Policy": CSP,
     "X-Content-Type-Options": "nosniff",
@@ -149,7 +153,7 @@ SECURITY_HEADERS = {
     "Referrer-Policy": "strict-origin-when-cross-origin",
     "Permissions-Policy": "camera=(), microphone=(), geolocation=(self)",
 }
-PRIVATE_PATHS = ("/responder", "/case/", "/safe/c/")  # pages with contacts or private keys: never cache
+PRIVATE_PATHS = ("/responder", "/case/", "/safe/c/", "/account")  # pages with contacts or private keys: never cache
 
 
 class SecurityHeaders:
@@ -201,6 +205,7 @@ logging.getLogger("uvicorn.access").addFilter(HideSecretsInLogs())
 def render(request: Request, name: str, status_code: int = 200, **ctx):
     ctx["user"] = current_user(request)
     ctx["is_responder"] = ctx["user"] is not None
+    ctx["family"] = current_family(request)
     ctx["photo_view"] = photo_view(request)
     return templates.TemplateResponse(request, name, ctx, status_code=status_code)
 
@@ -393,37 +398,124 @@ def require_admin(request: Request):
     return user
 
 
+def check_origin(request: Request) -> None:
+    """Refuse sign-in and sign-up forms posted from another site (login CSRF).
+
+    Browsers always send Origin on cross-site POSTs, so a missing header means same-site or a non-browser.
+    """
+    origin = request.headers.get("origin")
+    if origin and urlsplit(origin).netloc != request.headers.get("host"):
+        raise HTTPException(403, "This form must be sent from Kinfind itself.")
+
+
+def signed_in(request: Request, kind: str, account_id: int, location: str) -> RedirectResponse:
+    """Start a session and send the browser on, with the session cookie."""
+    with db.session() as conn:
+        token = accounts.start_session(conn, account_id, kind)
+    resp = RedirectResponse(location, status_code=303)
+    resp.set_cookie(kind, token, httponly=True, samesite="lax" if kind == "family" else "strict",
+                    secure=is_https(request.scope), max_age=accounts.session_seconds(kind))
+    return resp
+
+
+def password_problem(form) -> str | None:
+    password = str(form.get("password", ""))
+    if len(password) < accounts.MIN_PASSWORD:
+        return f"Choose a password of at least {accounts.MIN_PASSWORD} characters."
+    if password != form.get("confirm_password"):
+        return "The two passwords don't match."
+    return None
+
+
+TOO_MANY_TRIES = f"Too many failed attempts for this email. Wait {accounts.LOCKOUT_MINUTES} minutes and try again."
+WAITING = "Your request for responder access is waiting for an admin to approve it."
+
+
+def _login_page(request: Request, status_code: int = 200, **ctx):
+    ctx.setdefault("error", None)
+    ctx.setdefault("notice", None)
+    ctx.setdefault("email", "")
+    return render(request, "login.html", status_code=status_code, **ctx)
+
+
 @app.get("/responder/login")
 def login_form(request: Request):
-    return render(request, "login.html", error=None, email="")
+    return _login_page(request)
 
 
 @app.post("/responder/login")
 async def login(request: Request):
+    check_origin(request)
     form = await request.form()
     email, password = str(form.get("email", "")).strip().lower()[:200], str(form.get("password", ""))
     ip = limits.client_ip(request.scope)
     with db.session() as conn:
         if accounts.locked_out(conn, email, ip):
             accounts.log(conn, None, "blocked sign-in", email, ip)  # not counted, so the lock-out still ends
-            blocked = True
-        else:
-            blocked = False
-            user = accounts.authenticate(conn, email, password)
-            accounts.log(conn, user, "signed in" if user else "failed sign-in", None if user else email, ip)
-            token = accounts.start_session(conn, user["id"]) if user else None
-    if blocked:
-        return render(request, "login.html", status_code=429, email=email,
-                      error=f"Too many failed attempts for this email. Wait {accounts.LOCKOUT_MINUTES} minutes "
-                            "and try again.")
+            return _login_page(request, 429, email=email, error=TOO_MANY_TRIES)
+        account = accounts.check_credentials(conn, "responder", email, password)
+        user = account if account and account["active"] else None
+        accounts.log(conn, user, "signed in" if user else "failed sign-in", None if user else email, ip)
+        if not account:
+            accounts.record_failure(conn, "responder", email, ip)
+    if account and account["approval"] == "pending":  # right password: safe to say why
+        return _login_page(request, 403, email=email, notice=WAITING)
     if not user:
-        return render(request, "login.html", status_code=401, email=email,
-                      error="That email and password don't match an active account.")
-    resp = RedirectResponse("/responder/password" if user["must_change_password"] else "/responder",
-                            status_code=303)
-    resp.set_cookie("responder", token, httponly=True, samesite="strict", secure=is_https(request.scope),
-                    max_age=accounts.SESSION_HOURS * 3600)
-    return resp
+        return _login_page(request, 401, email=email, error="That email and password don't match an active account.")
+    return signed_in(request, "responder", user["id"],
+                     "/responder/password" if user["must_change_password"] else "/responder")
+
+
+@app.post("/responder/google")
+async def responder_google(request: Request):
+    """'Continue with Google' for responders: signs in an approved responder, or files an access request."""
+    check_origin(request)
+    claims = accounts.verify_google(str((await request.form()).get("credential", "")))
+    if not claims:
+        return _login_page(request, 401, error="Google sign-in didn't work. Try again, or use your email and password.")
+    with db.session() as conn:
+        account = accounts.google_account(conn, "responder", claims)
+        if not account:
+            rid, _ = accounts.create(conn, (claims.get("name") or claims["email"].split("@")[0])[:200],
+                                     claims["email"], active=False, approval="pending", google_sub=claims["sub"])
+            accounts.log(conn, {"id": rid}, "requested access (Google)", claims["email"])
+        elif account["active"]:
+            accounts.log(conn, account, "signed in with Google")
+    if not account:
+        return _login_page(request, notice="Thanks. Your request for responder access has been sent. "
+                                           "You can sign in with Google once an admin approves it.")
+    if account["approval"] == "pending":
+        return _login_page(request, 403, notice=WAITING)
+    if not account["active"]:
+        return _login_page(request, 401, error="This account isn't active. Ask an admin in your team.")
+    return signed_in(request, "responder", account["id"],
+                     "/responder/password" if account["must_change_password"] else "/responder")
+
+
+@app.get("/responder/signup")
+def responder_signup_form(request: Request):
+    return render(request, "responder_signup.html", error=None, form={}, sent=False)
+
+
+@app.post("/responder/signup")
+async def responder_signup(request: Request):
+    """A rescue worker asks for access. The account stays switched off until an admin approves it."""
+    check_origin(request)
+    form = await request.form()
+    name, email = _text(form.get("name"), 200), (_text(form.get("email"), 200) or "").lower()
+    organisation = _text(form.get("organisation"), 200)
+    keep = {"name": name or "", "email": email, "organisation": organisation or ""}
+    error = password_problem(form)
+    if not (name and email and "@" in email and organisation):
+        error = "Give your name, work email and the organisation you respond with."
+    if error:
+        return render(request, "responder_signup.html", status_code=400, error=error, form=keep, sent=False)
+    with db.session() as conn:
+        if not accounts.find(conn, "responder", email):  # existing emails get the same reply, so they can't be probed
+            rid, _ = accounts.create(conn, name, email, organisation=organisation, password=str(form.get("password")),
+                                     must_change=False, active=False, approval="pending")
+            accounts.log(conn, {"id": rid}, "requested access", email)
+    return render(request, "responder_signup.html", error=None, form=keep, sent=True)
 
 
 @app.post("/responder/logout")
@@ -472,11 +564,13 @@ async def change_password(request: Request):
 
 def _team_page(request: Request, status_code: int = 200, **ctx):
     with db.session() as conn:
-        team = conn.execute("""SELECT * FROM responders
+        team = conn.execute("""SELECT * FROM responders WHERE approval IS NULL
                                ORDER BY active DESC, role = 'admin' DESC, name COLLATE NOCASE""").fetchall()
+        requests_ = conn.execute("SELECT * FROM responders WHERE approval = 'pending' ORDER BY id").fetchall()
     ctx.setdefault("error", None)
     ctx.setdefault("issued", None)
-    return render(request, "team.html", status_code=status_code, team=team, roles=accounts.ROLES, **ctx)
+    return render(request, "team.html", status_code=status_code, team=team, access_requests=requests_,
+                  roles=accounts.ROLES, **ctx)
 
 
 @app.get("/responder/team")
@@ -507,7 +601,7 @@ async def add_member(request: Request):
 async def update_member(request: Request, rid: int):
     admin = require_admin(request)
     action = _choice((await request.form()).get("action"),
-                     ("deactivate", "activate", "reset", "make-admin", "make-responder"))
+                     ("approve", "reject", "deactivate", "activate", "reset", "make-admin", "make-responder"))
     if not action:
         raise HTTPException(400)
     if rid == admin["id"]:  # so there is always at least one active admin
@@ -518,7 +612,13 @@ async def update_member(request: Request, rid: int):
         member = conn.execute("SELECT * FROM responders WHERE id=?", (rid,)).fetchone()
         if not member:
             raise HTTPException(404)
-        if action in ("deactivate", "activate"):
+        if (action in ("approve", "reject")) != (member["approval"] == "pending"):
+            raise HTTPException(400, "Only access requests can be approved or rejected.")
+        if action == "approve":
+            conn.execute("UPDATE responders SET active=1, approval=NULL WHERE id=?", (rid,))
+        elif action == "reject":
+            conn.execute("UPDATE responders SET active=0, approval='rejected' WHERE id=?", (rid,))
+        elif action in ("deactivate", "activate"):
             conn.execute("UPDATE responders SET active=? WHERE id=?", (int(action == "activate"), rid))
             if action == "deactivate":
                 accounts.end_all_sessions(conn, rid)
@@ -529,7 +629,8 @@ async def update_member(request: Request, rid: int):
             issued = {"name": member["name"], "email": member["email"], "password": password, "new": False}
         else:
             conn.execute("UPDATE responders SET role=? WHERE id=?", (action.removeprefix("make-"), rid))
-        accounts.log(conn, admin, {"deactivate": "deactivated account", "activate": "reactivated account",
+        accounts.log(conn, admin, {"approve": "approved access request", "reject": "rejected access request",
+                                   "deactivate": "deactivated account", "activate": "reactivated account",
                                    "reset": "reset password", "make-admin": "made admin",
                                    "make-responder": "made responder"}[action], member["email"])
     if issued:
@@ -543,6 +644,156 @@ def activity(request: Request):
     with db.session() as conn:
         entries = accounts.recent_activity(conn)
     return render(request, "activity.html", entries=entries)
+
+
+# --- family accounts (optional) -----------------------------------------------
+#
+# Private links keep working without an account. An account just keeps a family's cases and
+# check-ins in one place: reports filed while signed in are added automatically, and older ones
+# can be added from their private page.
+
+def current_family(request: Request):
+    if not hasattr(request.state, "family"):
+        with db.session() as conn:
+            request.state.family = accounts.from_session(conn, request.cookies.get("family"), "family")
+    return request.state.family
+
+
+def _family_auth_page(request: Request, page: str, status_code: int = 200, **ctx):
+    ctx.setdefault("error", None)
+    ctx.setdefault("form", {})
+    ctx["next"] = _local_path(request.query_params.get("next") or ctx.get("next"))
+    return render(request, page, status_code=status_code, **ctx)
+
+
+def _local_path(value) -> str:
+    """Where to go after signing in: a path on this site only."""
+    value = str(value or "")
+    return value if value.startswith("/") and not value.startswith("//") and "\\" not in value else "/account"
+
+
+@app.get("/account/signup")
+def family_signup_form(request: Request):
+    return _family_auth_page(request, "account_signup.html")
+
+
+@app.post("/account/signup")
+async def family_signup(request: Request):
+    check_origin(request)
+    form = await request.form()
+    name, email = _text(form.get("name"), 200), (_text(form.get("email"), 200) or "").lower()
+    keep, nxt = {"name": name or "", "email": email}, form.get("next")
+    error = password_problem(form)
+    if not (name and email and "@" in email):
+        error = "Give your name and a valid email address."
+    if error:
+        return _family_auth_page(request, "account_signup.html", 400, error=error, form=keep, next=nxt)
+    try:
+        with db.session() as conn:
+            fid = accounts.create_family(conn, name, email, str(form.get("password")))
+    except sqlite3.IntegrityError:
+        return _family_auth_page(request, "account_signup.html", 400, form=keep, next=nxt,
+                                 error="There's already an account with this email. Sign in instead.")
+    return signed_in(request, "family", fid, _local_path(nxt))
+
+
+@app.get("/account/login")
+def family_login_form(request: Request):
+    return _family_auth_page(request, "account_login.html")
+
+
+@app.post("/account/login")
+async def family_login(request: Request):
+    check_origin(request)
+    form = await request.form()
+    email, password, nxt = str(form.get("email", "")).strip().lower()[:200], str(form.get("password", "")), form.get("next")
+    ip = limits.client_ip(request.scope)
+    with db.session() as conn:
+        if accounts.locked_out(conn, email, ip, "family"):
+            return _family_auth_page(request, "account_login.html", 429, error=TOO_MANY_TRIES,
+                                     form={"email": email}, next=nxt)
+        family = accounts.authenticate(conn, email, password, "family")
+        if not family:
+            accounts.record_failure(conn, "family", email, ip)
+    if not family:
+        return _family_auth_page(request, "account_login.html", 401, form={"email": email}, next=nxt,
+                                 error="That email and password don't match an account.")
+    return signed_in(request, "family", family["id"], _local_path(nxt))
+
+
+@app.post("/account/google")
+async def family_google(request: Request):
+    """'Continue with Google' for families: signs in, or creates the account on first use."""
+    check_origin(request)
+    form = await request.form()
+    claims = accounts.verify_google(str(form.get("credential", "")))
+    if not claims:
+        return _family_auth_page(request, "account_login.html", 401, next=form.get("next"),
+                                 error="Google sign-in didn't work. Try again, or use your email and password.")
+    with db.session() as conn:
+        family = accounts.google_account(conn, "family", claims)
+        fid = family["id"] if family else accounts.create_family(
+            conn, (claims.get("name") or claims["email"].split("@")[0])[:200], claims["email"], google_sub=claims["sub"])
+    if family and not family["active"]:
+        return _family_auth_page(request, "account_login.html", 401, error="This account has been closed.")
+    return signed_in(request, "family", fid, _local_path(form.get("next")))
+
+
+@app.post("/account/logout")
+def family_logout(request: Request):
+    with db.session() as conn:
+        accounts.end_session(conn, request.cookies.get("family"), "family")
+    resp = RedirectResponse("/", status_code=303)
+    resp.delete_cookie("family")
+    return resp
+
+
+@app.get("/account")
+def family_account(request: Request):
+    family = current_family(request)
+    if not family:
+        return RedirectResponse("/account/login", status_code=303)
+    with db.session() as conn:
+        cases = conn.execute("""
+            SELECT m.ref, m.access_token, m.full_name, m.created_at, m.appeal_public, m.appeal_review, d.name AS disaster,
+                   (SELECT COUNT(*) FROM tips t WHERE t.missing_id = m.id AND t.status != 'hidden') AS tips,
+                   (SELECT COUNT(*) FROM verification_requests v WHERE v.missing_id = m.id) AS requests
+            FROM missing_reports m JOIN disasters d ON d.id = m.disaster_id
+            WHERE m.family_id = ? ORDER BY m.id DESC""", (family["id"],)).fetchall()
+        checkins = conn.execute("""
+            SELECT c.token, c.status, c.updated_at, d.name AS disaster,
+                   (SELECT group_concat(full_name, ', ') FROM checkin_people p WHERE p.checkin_id = c.id) AS people
+            FROM checkins c JOIN disasters d ON d.id = c.disaster_id
+            WHERE c.family_id = ? AND c.status != 'removed' ORDER BY c.id DESC""", (family["id"],)).fetchall()
+    return render(request, "account.html", cases=cases, checkins=checkins)
+
+
+def _save_to_account(request: Request, table: str, key_column: str, key: str, back: str):
+    """Add a case or check-in, opened with its private link, to the signed-in family's account."""
+    family = current_family(request)
+    if not family:
+        return RedirectResponse(f"/account/login?next={quote(back, safe='/')}", status_code=303)
+    with db.session() as conn:
+        row = conn.execute(f"SELECT id, family_id FROM {table} WHERE {key_column}=?", (key,)).fetchone()
+        if row["family_id"] not in (None, family["id"]):
+            raise HTTPException(403, "This is already saved to another family account.")
+        conn.execute(f"UPDATE {table} SET family_id=? WHERE id=?", (family["id"], row["id"]))
+    return RedirectResponse(back, status_code=303)
+
+
+@app.post("/case/{ref}/save")
+async def save_case(request: Request, ref: str):
+    k = str((await request.form()).get("k", ""))
+    with db.session() as conn:
+        _load_case(conn, ref, k)  # needs the private link
+    return _save_to_account(request, "missing_reports", "ref", ref, f"/case/{ref}?k={k}")
+
+
+@app.post("/safe/c/{token}/save")
+def save_checkin(request: Request, token: str):
+    with db.session() as conn:
+        _load_checkin(conn, token)
+    return _save_to_account(request, "checkins", "token", token, f"/safe/c/{token}")
 
 
 # --- families ----------------------------------------------------------------
@@ -637,6 +888,8 @@ async def create_missing(request: Request, background: BackgroundTasks):
              reporter_name, reporter_contact, _text(form.get("person_phone"), 40)))
         await save_features(conn, parse_features(form), "missing", cur.lastrowid)
         await save_photos(conn, form, "missing", cur.lastrowid)
+        if family := current_family(request):
+            conn.execute("UPDATE missing_reports SET family_id=? WHERE id=?", (family["id"], cur.lastrowid))
     background.add_task(ai_match.run_for, "missing", cur.lastrowid)  # no-op without an API key
     return RedirectResponse(f"/case/{ref}?k={token}&new=1", status_code=303)
 
@@ -904,6 +1157,8 @@ async def create_checkin(request: Request):
         conn.executemany("""INSERT INTO checkin_people (checkin_id, full_name, name_key, phone, phone_key, is_reporter)
                             VALUES (:checkin_id, :full_name, :name_key, :phone, :phone_key, :is_reporter)""",
                          [{**person, "checkin_id": cur.lastrowid} for person in people])
+        if family := current_family(request):
+            conn.execute("UPDATE checkins SET family_id=? WHERE id=?", (family["id"], cur.lastrowid))
     return RedirectResponse(f"/safe/c/{token}?new=1", status_code=303)
 
 

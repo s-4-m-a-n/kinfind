@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}My account · {{ app_name }}{% endblock %}
+{% block content %}
+<div class="page-head row-between">
+  <div>
+    <h1>{{ family.name }}</h1>
+    <p class="lede">{{ family.email }}</p>
+  </div>
+  <div class="actions">
+    <a class="button" href="/missing/new">+ Report someone missing</a>
+    <a class="button secondary" href="/safe/new">I'm safe</a>
+  </div>
+</div>
+
+<h2>People you're looking for {% if cases %}<span class="count">{{ cases|length }}</span>{% endif %}</h2>
+{% if cases %}
+<ul class="matches">
+  {% for c in cases %}
+  <li class="match account-row">
+    <div class="body">
+      <h3><a href="/case/{{ c.ref }}?k={{ c.access_token }}">{{ c.full_name }}</a> <small>{{ c.ref }}</small></h3>
+      <p class="meta">{{ c.disaster }} · reported {{ c.created_at[:10] }}
+        {% if c.requests %} · {{ c.requests }} verification request{{ '' if c.requests == 1 else 's' }}{% endif %}
+        {% if c.tips %} · {{ c.tips }} sighting{{ '' if c.tips == 1 else 's' }}{% endif %}</p>
+      <p class="meta">{% if c.appeal_public and c.appeal_review == 'approved' %}<span class="pill strong">Public appeal live</span>
+        {% elif c.appeal_public and c.appeal_review == 'pending' %}<span class="pill">Appeal waiting for a responder</span>
+        {% elif c.appeal_public and c.appeal_review == 'rejected' %}<span class="pill">Appeal not approved</span>
+        {% else %}<span class="pill">Private</span>{% endif %}</p>
+    </div>
+    <div class="action"><a class="button small secondary" href="/case/{{ c.ref }}?k={{ c.access_token }}">Open case</a></div>
+  </li>
+  {% endfor %}
+</ul>
+{% else %}
+<p class="empty">No reports yet. Reports you file while signed in appear here. To add one you filed before, open its
+  private link and choose <strong>Save to my account</strong>.</p>
+{% endif %}
+
+<h2>Your "I'm safe" check-ins {% if checkins %}<span class="count">{{ checkins|length }}</span>{% endif %}</h2>
+{% if checkins %}
+<ul class="matches">
+  {% for c in checkins %}
+  <li class="match account-row">
+    <div class="body">
+      <h3>{{ c.people }}</h3>
+      <p class="meta">{{ c.disaster }} · updated {{ c.updated_at[:16] }} UTC · {{ 'Shown to relatives' if c.status == 'active' else 'Withdrawn' }}</p>
+    </div>
+    <div class="action"><a class="button small secondary" href="/safe/c/{{ c.token }}">Manage</a></div>
+  </li>
+  {% endfor %}
+</ul>
+{% else %}
+<p class="empty">No check-ins yet.</p>
+{% endif %}
+
+<form method="post" action="/account/logout" class="account-signout"><button class="secondary">Sign out</button></form>
+{% endblock %}

@@ -1,0 +1,19 @@
+{# "Save to my account" on a page opened with its private link.
+   Call with owner (the row's family_id), action (POST url), back (this page's path) and k (case key, or ""). #}
+{% macro save(owner, action, back, k="") %}
+<div class="account-save">
+  {% if family and owner == family.id %}
+    <span class="pill strong">Saved to your account</span> <a href="/account">See all your cases →</a>
+  {% elif family and not owner %}
+    <form method="post" action="{{ action }}" class="inline">
+      {% if k %}<input type="hidden" name="k" value="{{ k }}">{% endif %}
+      <button class="secondary small">Save to my account</button>
+    </form>
+    <small>Keeps it with your other cases, so you don't need this link.</small>
+  {% elif not family %}
+    <small><a href="/account/signup?next={{ back|urlencode }}">Create a free account</a> or
+      <a href="/account/login?next={{ back|urlencode }}">sign in</a> to keep this with your other cases.
+      Optional: this private link always works.</small>
+  {% endif %}
+</div>
+{% endmacro %}

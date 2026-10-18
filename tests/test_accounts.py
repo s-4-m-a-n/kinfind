@@ -114,7 +114,7 @@ def test_repeated_wrong_passwords_lock_the_email_out():
         locked = client.post("/responder/login", data={"email": "guessed@example.org", "password": "real-password-1"})
         assert locked.status_code == 429 and "Too many failed attempts" in locked.text
         with db.session() as conn:  # 15 minutes later
-            conn.execute("UPDATE audit_log SET created_at = datetime('now', '-16 minutes') WHERE detail=?",
+            conn.execute("UPDATE sign_in_failures SET created_at = datetime('now', '-16 minutes') WHERE email=?",
                          ("guessed@example.org",))
         resp = client.post("/responder/login", data={"email": "guessed@example.org", "password": "real-password-1"},
                            follow_redirects=False)

@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% import "_google.html" as google %}
+{% block title %}Request responder access · {{ app_name }}{% endblock %}
+{% block content %}
+<div class="stack narrow">
+  <h1>Request responder access</h1>
+  {% if sent %}
+    <p class="notice" role="status"><strong>Request sent.</strong> An admin will check who you are before switching
+      your account on, usually by contacting your organisation. You can sign in once it's approved.</p>
+    <p><a href="/responder/login">Back to sign in</a></p>
+  {% else %}
+    <p class="hint">Responders see families' contact details and photos of people found, including the deceased,
+      so an admin approves every account. Use your work email.</p>
+    {% if error %}<p class="error">{{ error }}</p>{% endif %}
+    {{ google.button("/responder/google") }}
+    <form method="post" action="/responder/signup" class="stack">
+      <label>Your name <input name="name" value="{{ form.name }}" required maxlength="200" autocomplete="name"></label>
+      <label>Work email <input type="email" name="email" value="{{ form.email }}" required maxlength="200" autocomplete="email"></label>
+      <label>Organisation <input name="organisation" value="{{ form.organisation }}" required maxlength="200" placeholder="e.g. Nepal Red Cross, Sunsari"></label>
+      <label>Password <small>(at least 10 characters)</small>
+        <input type="password" name="password" minlength="10" required autocomplete="new-password"></label>
+      <label>Password again <input type="password" name="confirm_password" minlength="10" required autocomplete="new-password"></label>
+      <button>Send request</button>
+    </form>
+    <p class="hint">Already approved? <a href="/responder/login">Sign in</a>.</p>
+  {% endif %}
+</div>
+{% endblock %}

@@ -1,0 +1,11 @@
+{# "Continue with Google" button, shown only when GOOGLE_CLIENT_ID is set and Google's script loads.
+   Call with endpoint (/account/google or /responder/google) and optional next. #}
+{% macro button(endpoint, next="") %}
+{% if google_client_id %}
+<div class="google-block" data-google-block hidden>
+  <div class="google-signin" data-google-signin data-client-id="{{ google_client_id }}" data-endpoint="{{ endpoint }}" data-next="{{ next }}"></div>
+  <p class="divider"><span>or with your email</span></p>
+</div>
+<script src="/static/google.js?v={{ asset_v }}" defer></script>
+{% endif %}
+{% endmacro %}

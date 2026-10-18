@@ -327,6 +327,19 @@ p.notice { margin: 0 0 1rem; }
 .appeal-review .hint { margin: 0; }
 .pill.attention-pill { color: var(--mid); border-color: var(--mid); background: var(--mid-soft); }
 
+/* sign-in, sign-up and family accounts */
+.google-block { display: grid; gap: .75rem; }
+.google-block[hidden] { display: none; }
+.google-signin { min-height: 44px; display: flex; justify-content: center; }
+.divider { display: flex; align-items: center; gap: .75rem; color: var(--muted); font-size: .85rem; margin: 0; }
+.divider::before, .divider::after { content: ""; flex: 1; border-top: 1px solid var(--line); }
+.account-save { display: flex; align-items: center; gap: .4rem .75rem; flex-wrap: wrap; margin-top: .75rem; font-size: .9rem; }
+.account-save form.inline { display: inline; }
+.match.tip-row, .match.account-row { grid-template-columns: 1fr auto; }  /* cards without a score column */
+@media (max-width: 640px) { .match.tip-row, .match.account-row { grid-template-columns: 1fr; } }
+.account-row .action { align-self: center; }
+.account-signout { margin-top: 2rem; }
+
 /* team + activity (admins) */
 .notice.issued .facts { grid-template-columns: 6.5rem 1fr; }
 code.secret { font-size: 1.05rem; font-weight: 700; letter-spacing: .04em; user-select: all; }

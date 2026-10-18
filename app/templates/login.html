@@ -1,13 +1,20 @@
 {% extends "base.html" %}
+{% import "_google.html" as google %}
 {% block title %}Responder sign in · {{ app_name }}{% endblock %}
 {% block content %}
-<form method="post" action="/responder/login" class="stack narrow">
+<div class="stack narrow">
   <h1>Responder sign in</h1>
-  <p class="hint">For rescue teams, hospitals and authorities logging found people. Your admin gives you an account.</p>
+  <p class="hint">For rescue teams, hospitals and authorities logging found people.</p>
+  {% if notice %}<p class="notice" role="status">{{ notice }}</p>{% endif %}
   {% if error %}<p class="error">{{ error }}</p>{% endif %}
-  <label>Email <input type="email" name="email" value="{{ email }}" autocomplete="username" required {% if not email %}autofocus{% endif %}></label>
-  <label>Password <input type="password" name="password" autocomplete="current-password" required {% if email %}autofocus{% endif %}></label>
-  <button>Sign in</button>
-  <p class="hint">Forgotten your password? Ask an admin in your team to reset it.</p>
-</form>
+  {{ google.button("/responder/google") }}
+  <form method="post" action="/responder/login" class="stack">
+    <label>Email <input type="email" name="email" value="{{ email }}" autocomplete="username" required {% if not email %}autofocus{% endif %}></label>
+    <label>Password <input type="password" name="password" autocomplete="current-password" required {% if email %}autofocus{% endif %}></label>
+    <button>Sign in</button>
+  </form>
+  <p class="hint">New to the team? <a href="/responder/signup">Request access</a>. An admin approves every request.<br>
+    Forgotten your password? Ask an admin in your team to reset it.</p>
+  <p class="hint">Looking for someone? <a href="/account/login">Family sign in</a> is separate.</p>
+</div>
 {% endblock %}

@@ -32,7 +32,12 @@
         <a href="/missing/new" {% if path == '/missing/new' %}aria-current="page"{% endif %}>Report missing</a>
         <a href="/appeals" {% if path.startswith('/appeal') %}aria-current="page"{% endif %}>Have you seen them?</a>
         <a href="/safe" class="nav-safe" {% if path.startswith('/safe') %}aria-current="page"{% endif %}>I'm safe</a>
-        <a href="/responder/login" {% if path == '/responder/login' %}aria-current="page"{% endif %}>Responders</a>
+        {% if family %}
+        <a href="/account" {% if path == '/account' %}aria-current="page"{% endif %}>My account</a>
+        {% else %}
+        <a href="/account/login" {% if path.startswith('/account') %}aria-current="page"{% endif %}>Sign in</a>
+        <a href="/responder/login" {% if path.startswith('/responder/') %}aria-current="page"{% endif %}>Responders</a>
+        {% endif %}
       {% endif %}
     </nav>
   </header>

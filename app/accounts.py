@@ -1,7 +1,13 @@
-"""Responder accounts: one sign-in each, sessions that expire, and a log of who did what.
+"""Accounts: responders (and admins) and families. One sign-in each, sessions that expire,
+and a log of what responders do.
 
-Admins add responders on the Team page and hand them a one-time password; responders
-choose their own password at first sign-in.
+The two kinds are kept completely apart: separate tables, sessions and cookies, so a family
+account can never open a responder page.
+
+- Responders: an admin adds them on the Team page and hands over a one-time password, or they
+  request access themselves (email or Google) and an admin approves the request.
+- Families: optional. Anyone can sign up (email or Google) to keep all their cases and
+  check-ins in one place. Private links keep working without an account.
 
     python -m app.accounts create-admin --email you@example.org      # first admin
     python -m app.accounts reset-password --email you@example.org    # locked out
@@ -21,10 +27,16 @@ from datetime import datetime, timedelta, timezone
 from . import db
 
 ROLES = ("responder", "admin")
-SESSION_HOURS = 12
 MIN_PASSWORD = 10
 MAX_FAILED_SIGN_INS, MAX_FAILED_SIGN_INS_ANY_IP, LOCKOUT_MINUTES = 5, 50, 15
 _SCRYPT = {"n": 2**14, "r": 8, "p": 1}
+NO_PASSWORD = "!"  # stored for Google-only accounts: matches no password
+
+# kind -> (account table, session table, session column pointing at the account, session length)
+KINDS = {
+    "responder": ("responders", "sessions", "responder_id", timedelta(hours=12)),
+    "family": ("families", "family_sessions", "family_id", timedelta(days=30)),
+}
 
 
 def hash_password(password: str) -> str:
@@ -33,9 +45,9 @@ def hash_password(password: str) -> str:
     return f"scrypt${salt.hex()}${digest.hex()}"
 
 
-def check_password(password: str, stored: str) -> bool:
+def check_password(password: str, stored: str | None) -> bool:
     try:
-        _, salt, digest = stored.split("$")
+        _, salt, digest = (stored or "").split("$")
         test = hashlib.scrypt(password.encode(), salt=bytes.fromhex(salt), **_SCRYPT)
     except ValueError:
         return False
@@ -63,36 +75,46 @@ def _token_hash(token: str) -> str:
 # --- accounts ----------------------------------------------------------------
 
 def create(conn, name: str, email: str, role: str = "responder", organisation: str | None = None,
-           password: str | None = None, must_change: bool = True) -> tuple[int, str]:
-    """Add an account. Returns (id, password); the password is a one-time one unless given."""
-    password = password or temp_password()
+           password: str | None = None, must_change: bool = True, active: bool = True,
+           approval: str | None = None, google_sub: str | None = None) -> tuple[int, str | None]:
+    """Add a responder account. Returns (id, password).
+
+    Without a password a one-time one is made, unless google_sub is given (a Google-only account).
+    """
+    if password is None and not google_sub:
+        password = temp_password()
     cur = conn.execute(
-        """INSERT INTO responders (name, email, organisation, role, password_hash, must_change_password)
-           VALUES (?, ?, ?, ?, ?, ?)""",
-        (name, email.strip().lower(), organisation, role, hash_password(password), int(must_change)))
+        """INSERT INTO responders (name, email, organisation, role, password_hash, must_change_password,
+                                   active, approval, google_sub)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (name, email.strip().lower(), organisation, role, hash_password(password) if password else NO_PASSWORD,
+         int(must_change and password is not None), int(active), approval, google_sub))
     return cur.lastrowid, password
 
 
-def authenticate(conn, email: str, password: str) -> sqlite3.Row | None:
-    row = conn.execute("SELECT * FROM responders WHERE email=?", (email.strip().lower(),)).fetchone()
+def create_family(conn, name: str, email: str, password: str | None = None, google_sub: str | None = None) -> int:
+    return conn.execute("INSERT INTO families (name, email, password_hash, google_sub) VALUES (?, ?, ?, ?)",
+                        (name, email.strip().lower(), hash_password(password) if password else NO_PASSWORD,
+                         google_sub)).lastrowid
+
+
+def find(conn, kind: str, email: str) -> sqlite3.Row | None:
+    table = KINDS[kind][0]
+    return conn.execute(f"SELECT * FROM {table} WHERE email=?", (email.strip().lower(),)).fetchone()
+
+
+def check_credentials(conn, kind: str, email: str, password: str) -> sqlite3.Row | None:
+    """The account if the password is right, whether or not it is active. Same timing either way."""
+    row = find(conn, kind, email)
     if not row:
         hash_password(password)  # take as long as a real check, so emails can't be probed by timing
         return None
-    ok = check_password(password, row["password_hash"])  # checked even for deactivated accounts, for the same reason
-    return row if ok and row["active"] else None
+    return row if check_password(password, row["password_hash"]) else None
 
 
-def locked_out(conn, email: str, ip: str) -> bool:
-    """Too many failed sign-ins for this email recently: slows down password guessing.
-
-    Counted per email *and* address, so a stranger guessing doesn't lock the real person out.
-    A much higher limit per email alone stops guessing spread over many addresses.
-    """
-    since = _stamp(_now() - timedelta(minutes=LOCKOUT_MINUTES))
-    mine, everyone = conn.execute("""SELECT COALESCE(SUM(ip = ?), 0), COUNT(*) FROM audit_log
-                                     WHERE action='failed sign-in' AND detail=? AND created_at > ?""",
-                                  (ip, email.strip().lower(), since)).fetchone()
-    return mine >= MAX_FAILED_SIGN_INS or everyone >= MAX_FAILED_SIGN_INS_ANY_IP
+def authenticate(conn, email: str, password: str, kind: str = "responder") -> sqlite3.Row | None:
+    row = check_credentials(conn, kind, email, password)
+    return row if row and row["active"] else None
 
 
 def set_password(conn, responder_id: int, password: str, must_change: bool = False) -> None:
@@ -112,38 +134,98 @@ def bootstrap_admin() -> None:
             create(conn, "Administrator", email, "admin", password=password, must_change=False)
 
 
+# --- Google sign-in ----------------------------------------------------------
+
+def google_client_id() -> str | None:
+    return os.environ.get("GOOGLE_CLIENT_ID") or None
+
+
+def verify_google(credential: str) -> dict | None:
+    """Claims of a Google ID token issued to our client for a verified email, or None."""
+    client_id = google_client_id()
+    if not client_id or not credential:
+        return None
+    from google.auth.exceptions import GoogleAuthError
+    from google.auth.transport import requests as google_requests
+    from google.oauth2 import id_token
+    try:
+        claims = id_token.verify_oauth2_token(credential, google_requests.Request(), client_id)
+    except (ValueError, GoogleAuthError):
+        return None
+    return claims if claims.get("email_verified") and claims.get("email") else None
+
+
+def google_account(conn, kind: str, claims: dict) -> sqlite3.Row | None:
+    """The account for these Google claims: by Google ID, else by the (verified) email, which is then linked."""
+    table = KINDS[kind][0]
+    row = conn.execute(f"SELECT * FROM {table} WHERE google_sub=?", (claims["sub"],)).fetchone()
+    if row:
+        return row
+    row = find(conn, kind, claims["email"])
+    if row and not row["google_sub"]:
+        conn.execute(f"UPDATE {table} SET google_sub=? WHERE id=?", (claims["sub"], row["id"]))
+        row = conn.execute(f"SELECT * FROM {table} WHERE id=?", (row["id"],)).fetchone()
+    return row
+
+
 # --- sessions ----------------------------------------------------------------
 
-def start_session(conn, responder_id: int) -> str:
+def start_session(conn, account_id: int, kind: str = "responder") -> str:
+    table, sessions, column, length = KINDS[kind]
     token = secrets.token_urlsafe(32)
     now = _now()
-    conn.execute("DELETE FROM sessions WHERE expires_at <= ?", (_stamp(now),))
-    conn.execute("INSERT INTO sessions (token_hash, responder_id, expires_at) VALUES (?, ?, ?)",
-                 (_token_hash(token), responder_id, _stamp(now + timedelta(hours=SESSION_HOURS))))
-    conn.execute("UPDATE responders SET last_login_at=datetime('now') WHERE id=?", (responder_id,))
+    conn.execute(f"DELETE FROM {sessions} WHERE expires_at <= ?", (_stamp(now),))
+    conn.execute(f"INSERT INTO {sessions} (token_hash, {column}, expires_at) VALUES (?, ?, ?)",
+                 (_token_hash(token), account_id, _stamp(now + length)))
+    conn.execute(f"UPDATE {table} SET last_login_at=datetime('now') WHERE id=?", (account_id,))
     return token
 
 
-def from_session(conn, token: str | None) -> sqlite3.Row | None:
+def session_seconds(kind: str) -> int:
+    return int(KINDS[kind][3].total_seconds())
+
+
+def from_session(conn, token: str | None, kind: str = "responder") -> sqlite3.Row | None:
     if not token:
         return None
-    return conn.execute("""SELECT r.* FROM sessions s JOIN responders r ON r.id = s.responder_id
-                           WHERE s.token_hash=? AND s.expires_at > ? AND r.active = 1""",
+    table, sessions, column, _ = KINDS[kind]
+    return conn.execute(f"""SELECT a.* FROM {sessions} s JOIN {table} a ON a.id = s.{column}
+                            WHERE s.token_hash=? AND s.expires_at > ? AND a.active = 1""",
                         (_token_hash(token), _stamp(_now()))).fetchone()
 
 
-def end_session(conn, token: str | None) -> None:
+def end_session(conn, token: str | None, kind: str = "responder") -> None:
     if token:
-        conn.execute("DELETE FROM sessions WHERE token_hash=?", (_token_hash(token),))
+        conn.execute(f"DELETE FROM {KINDS[kind][1]} WHERE token_hash=?", (_token_hash(token),))
 
 
-def end_all_sessions(conn, responder_id: int, keep: str | None = None) -> None:
+def end_all_sessions(conn, account_id: int, keep: str | None = None, kind: str = "responder") -> None:
     """Sign someone out everywhere, optionally keeping the session they're using now."""
-    conn.execute("DELETE FROM sessions WHERE responder_id=? AND token_hash != ?",
-                 (responder_id, _token_hash(keep) if keep else ""))
+    _, sessions, column, _ = KINDS[kind]
+    conn.execute(f"DELETE FROM {sessions} WHERE {column}=? AND token_hash != ?",
+                 (account_id, _token_hash(keep) if keep else ""))
 
 
-# --- activity log ------------------------------------------------------------
+# --- password guessing -------------------------------------------------------
+
+def record_failure(conn, kind: str, email: str, ip: str) -> None:
+    conn.execute("INSERT INTO sign_in_failures (kind, email, ip) VALUES (?, ?, ?)", (kind, email.strip().lower(), ip))
+
+
+def locked_out(conn, email: str, ip: str, kind: str = "responder") -> bool:
+    """Too many failed sign-ins for this email recently: slows down password guessing.
+
+    Counted per email *and* address, so a stranger guessing doesn't lock the real person out.
+    A much higher limit per email alone stops guessing spread over many addresses.
+    """
+    since = _stamp(_now() - timedelta(minutes=LOCKOUT_MINUTES))
+    mine, everyone = conn.execute("""SELECT COALESCE(SUM(ip = ?), 0), COUNT(*) FROM sign_in_failures
+                                     WHERE kind=? AND email=? AND created_at > ?""",
+                                  (ip, kind, email.strip().lower(), since)).fetchone()
+    return mine >= MAX_FAILED_SIGN_INS or everyone >= MAX_FAILED_SIGN_INS_ANY_IP
+
+
+# --- activity log (responders) -----------------------------------------------
 
 def log(conn, user, action: str, detail: str | None = None, ip: str | None = None) -> None:
     conn.execute("INSERT INTO audit_log (responder_id, action, detail, ip) VALUES (?, ?, ?, ?)",
@@ -165,7 +247,7 @@ def main(argv=None) -> None:
     admin.add_argument("--email", required=True)
     admin.add_argument("--name", default="Administrator")
     admin.add_argument("--password", help="Prompted for if omitted")
-    reset = sub.add_parser("reset-password", help="Set a new password for an account")
+    reset = sub.add_parser("reset-password", help="Set a new password for a responder account")
     reset.add_argument("--email", required=True)
     reset.add_argument("--password", help="Prompted for if omitted")
     args = parser.parse_args(argv)
@@ -182,11 +264,11 @@ def main(argv=None) -> None:
                 sys.exit(f"{args.email} already has an account; use reset-password instead")
             print(f"Created admin {args.email}")
         else:
-            row = conn.execute("SELECT id FROM responders WHERE email=?", (args.email.strip().lower(),)).fetchone()
+            row = find(conn, "responder", args.email)
             if not row:
                 sys.exit(f"No account for {args.email}")
             set_password(conn, row["id"], password)
-            conn.execute("UPDATE responders SET active=1 WHERE id=?", (row["id"],))
+            conn.execute("UPDATE responders SET active=1, approval=NULL WHERE id=?", (row["id"],))
             end_all_sessions(conn, row["id"])
             print(f"Password updated for {args.email}")
 

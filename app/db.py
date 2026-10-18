@@ -161,6 +161,10 @@ CREATE TABLE IF NOT EXISTS responders (
     password_hash TEXT NOT NULL,
     must_change_password INTEGER NOT NULL DEFAULT 1,  -- set while they hold a one-time password
     active INTEGER NOT NULL DEFAULT 1,
+    -- 'pending' while a self-requested account waits for an admin (inactive until approved);
+    -- 'rejected' if the admin turned it down. Null for accounts admins created.
+    approval TEXT CHECK (approval IN ('pending', 'rejected')),
+    google_sub TEXT,                   -- Google account ID once they've used "Continue with Google"
     last_login_at TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -171,6 +175,35 @@ CREATE TABLE IF NOT EXISTS sessions (
     responder_id INTEGER NOT NULL REFERENCES responders(id),
     expires_at TEXT NOT NULL
 );
+
+-- Optional family accounts: all of a family's cases and check-ins in one place. Kept apart
+-- from responders (own table, sessions and cookie), so they can never open responder pages.
+CREATE TABLE IF NOT EXISTS families (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL,
+    email TEXT UNIQUE NOT NULL,        -- stored lower-case
+    password_hash TEXT NOT NULL,       -- '!' for Google-only accounts
+    google_sub TEXT UNIQUE,
+    active INTEGER NOT NULL DEFAULT 1,
+    last_login_at TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS family_sessions (
+    token_hash TEXT PRIMARY KEY,
+    family_id INTEGER NOT NULL REFERENCES families(id),
+    expires_at TEXT NOT NULL
+);
+
+-- Failed sign-ins, for the lock-out (app/accounts.py). Kept out of the activity log so family
+-- emails aren't shown to responders.
+CREATE TABLE IF NOT EXISTS sign_in_failures (
+    kind TEXT NOT NULL CHECK (kind IN ('responder', 'family')),
+    email TEXT NOT NULL,
+    ip TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS sign_in_failures_email ON sign_in_failures(kind, email, created_at);
 
 -- Who did what: sign-ins, records logged, decisions, views of family contacts and unfiltered photos.
 CREATE TABLE IF NOT EXISTS audit_log (
@@ -203,6 +236,10 @@ MIGRATIONS = [
     ("missing_reports", "person_phone", "TEXT"),
     ("missing_reports", "appeal_review", "TEXT"),
     ("audit_log", "ip", "TEXT"),
+    ("responders", "approval", "TEXT"),
+    ("responders", "google_sub", "TEXT"),
+    ("missing_reports", "family_id", "INTEGER REFERENCES families(id)"),
+    ("checkins", "family_id", "INTEGER REFERENCES families(id)"),
     ("ai_matches", "stage", "TEXT"),
     ("ai_matches", "shortlist_score", "INTEGER"),
     ("ai_matches", "shortlist_reason", "TEXT"),
@@ -235,6 +272,7 @@ def init() -> None:
             if column not in {r["name"] for r in conn.execute(f"PRAGMA table_info({table})")}:
                 conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
         conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS disasters_external ON disasters(external_id)")
+        conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS responders_google ON responders(google_sub)")
 
 
 # --- loading records in the shape app.matching expects -----------------------

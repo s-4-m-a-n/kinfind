@@ -23,6 +23,30 @@
 </div>
 {% endif %}
 
+{% if access_requests %}
+<h2>Access requests <span class="count">{{ access_requests|length }}</span></h2>
+<p class="hint">People who asked for responder access themselves. Check who they are, for example by calling their
+  organisation, before approving: responders see families' contact details and photos of the deceased.</p>
+<div class="table-wrap"><table>
+  <thead><tr><th>Name</th><th>Organisation</th><th>Requested</th><th></th></tr></thead>
+  <tbody>
+  {% for m in access_requests %}
+    <tr>
+      <td><strong>{{ m.name }}</strong><br><small>{{ m.email }}{% if m.google_sub %} · via Google{% endif %}</small></td>
+      <td>{{ m.organisation or '—' }}</td>
+      <td><small>{{ m.created_at[:16] }} UTC</small></td>
+      <td>
+        <form method="post" action="/responder/team/{{ m.id }}" class="team-actions">
+          <button name="action" value="approve" class="small">Approve</button>
+          <button name="action" value="reject" class="link danger">Reject</button>
+        </form>
+      </td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table></div>
+{% endif %}
+
 <form method="post" action="/responder/team">
   <fieldset>
     <legend>Add a responder</legend>

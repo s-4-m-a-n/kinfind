@@ -25,7 +25,8 @@ UPLOAD_SLACK = 1 * MB         # form fields and multipart overhead on top of the
 # Bucket name -> (requests, seconds), per IP address.
 BUCKETS = {
     "all": (600, 60),               # any request, including pages and photos: stops floods
-    "login": (10, 15 * 60),         # responder sign-in: stops password guessing
+    "login": (10, 15 * 60),         # responder and family sign-in: stops password guessing
+    "signup": (5, 60 * 60),         # new family accounts and responder access requests
     "report": (10, 60 * 60),        # new missing-person reports
     "found": (60, 10 * 60),         # responders logging found people
     "tip": (5, 10 * 60),            # community sightings
@@ -41,7 +42,8 @@ BUCKETS = {
 
 # (method, path pattern, bucket, largest body in bytes). First match wins.
 RULES = [
-    ("POST", r"/responder/login", "login", 4 * KB),
+    ("POST", r"/(responder|account)/(login|google)", "login", 8 * KB),  # a Google credential is ~1-2 KB
+    ("POST", r"/(responder|account)/signup", "signup", 8 * KB),
     ("POST", r"/missing", "report", MAX_RECORD_PHOTOS * MAX_PHOTO_BYTES + UPLOAD_SLACK),
     ("POST", r"/responder/found", "found", MAX_RECORD_PHOTOS * MAX_PHOTO_BYTES + UPLOAD_SLACK),
     ("POST", r"/appeal/[^/]+/tips", "tip", MAX_TIP_PHOTOS * MAX_PHOTO_BYTES + UPLOAD_SLACK),
