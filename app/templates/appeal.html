@@ -62,7 +62,7 @@
       <textarea name="message" rows="4" required maxlength="2000"></textarea></label>
     <div>
       <p class="hint">Photos (optional, up to 4). Please don't send photos of anyone who is badly hurt.</p>
-      {% include "_photo_list.html" %}
+      {% with max_photos = 4 %}{% include "_photo_list.html" %}{% endwith %}
     </div>
   </fieldset>
 

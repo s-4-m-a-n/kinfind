@@ -10,7 +10,7 @@ os.environ.setdefault("RESPONDER_KEY", "test-key")
 
 from fastapi.testclient import TestClient  # noqa: E402
 
-from app import main, safe, seed  # noqa: E402
+from app import limits, safe, seed  # noqa: E402
 from app.main import RESPONDER_KEY, app  # noqa: E402
 
 
@@ -30,7 +30,7 @@ def _find(client, name, phone):
 
 
 def test_check_in_and_find():
-    main._recent_requests.clear()
+    limits.reset()
     with TestClient(app) as client:
         seed.run()
         resp = client.post("/safe", data={
@@ -88,7 +88,7 @@ def test_check_in_and_find():
 
 
 def test_check_in_validation_and_limits():
-    main._recent_requests.clear()
+    limits.reset()
     with TestClient(app) as client:
         seed.run()
         assert client.post("/safe", data={"disaster_id": "1", "name": "No Phone"}).status_code == 400

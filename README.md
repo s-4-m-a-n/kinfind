@@ -56,6 +56,17 @@ On the missing-person form, families can add the person's own phone number (kept
 
 Check-ins are self-reported and never close a missing-person report.
 
+## Request limits
+
+All limits live in [app/limits.py](app/limits.py): a middleware checks every request against a table of rules before it reaches a route.
+
+- **Rate limits per IP address**, for example: responder sign-in 10 per 15 minutes (stops key guessing), new missing reports 10 per hour, community tips 5 and safe searches 20 per 10 minutes, AI re-checks 10 per 10 minutes (they cost money), and any request at all 600 per minute. A blocked request gets `429` with a `Retry-After` header.
+- **Request size limits**, checked against `Content-Length` first and then by counting bytes as they arrive, so chunked uploads can't get past them: 81 MB for a report or found record (10 photos × 8 MB), 33 MB for a tip (4 photos), and a few KB for text-only forms. Oversized requests get `413` before anything is stored.
+- **Per-form limits**: at most 10 photos and 20 distinctive features per record, 4 photos per tip, and 12 people per check-in. Forms also enforce the photo limit in the browser.
+- Any new form is covered automatically by the default rule.
+
+Limits are kept in memory per server process. Behind a reverse proxy, run uvicorn with `--proxy-headers --forwarded-allow-ips=<proxy ip>`, or every visitor will share the proxy's limits.
+
 ## How matching works
 
 All of the matching code is in [app/matching.py](app/matching.py). It is made of pure functions, so it is easy to tune and test.
@@ -111,7 +122,7 @@ This is a prototype. Before deploying it:
 
 - Give each responder their own account and keep an audit log, instead of one shared key.
 - Use HTTPS, encrypt photos at rest, and remove EXIF data from uploads.
-- Move the tip rate limit to shared storage, and add rate limits on report creation and zone suggestions, so people can't keep filing reports to probe found records.
+- Move rate limits to shared storage (e.g. Redis) if you run more than one server process.
 - Write a data-retention policy. Check consent and legal requirements in each region.
 - Use a map tile provider that allows production traffic. The public OpenStreetMap tile servers are only for light use, and each map load sends the visitor's IP address to them.
 - Before sending real photos to an AI provider, check its data-retention terms and get consent and legal approval. Photos of the deceased are especially sensitive.

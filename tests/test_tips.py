@@ -12,7 +12,7 @@ os.environ.setdefault("RESPONDER_KEY", "test-key")
 from fastapi.testclient import TestClient  # noqa: E402
 from PIL import Image  # noqa: E402
 
-from app import main, seed  # noqa: E402
+from app import limits, seed  # noqa: E402
 from app.main import RESPONDER_KEY, app  # noqa: E402
 
 
@@ -33,7 +33,7 @@ def _report(client, name, contact):
 
 
 def test_appeal_and_tips_flow():
-    main._recent_requests.clear()
+    limits.reset()
     with TestClient(app) as client:
         seed.run()
         ref, k = _report(client, "Nima Lama", "family-phone-555")
@@ -109,7 +109,7 @@ def test_appeal_and_tips_flow():
 
 
 def test_tip_abuse_limits():
-    main._recent_requests.clear()
+    limits.reset()
     with TestClient(app) as client:
         seed.run()
         ref, k = _report(client, "Rate Limit", "x")

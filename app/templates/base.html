@@ -107,7 +107,11 @@
     function renderPhotoList(input) {
       const box = document.getElementById(input.dataset.photoList);
       const keep = new DataTransfer(), problems = [];
-      for (const f of input.files) { const p = photoProblem(f); p ? problems.push(p) : keep.items.add(f); }
+      const max = Number(input.dataset.max) || Infinity;
+      for (const f of input.files) {
+        const p = photoProblem(f) || (keep.items.length >= max ? `Only ${max} photos can be added, so “${f.name}” was left out.` : "");
+        p ? problems.push(p) : keep.items.add(f);
+      }
       input.files = keep.files;
       box.replaceChildren(...[...input.files].map((f, i) => {
         const fig = document.createElement("figure");

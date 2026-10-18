@@ -38,13 +38,13 @@ def load_env_file(path: Path) -> None:
 
 load_env_file(Path(__file__).resolve().parent.parent / ".env")  # before anything reads os.environ
 
-from . import ai_match, db, gdacs, illustrate, safe, sketch  # noqa: E402
+from . import ai_match, db, gdacs, illustrate, limits, safe, sketch  # noqa: E402
 from .matching import BODY_LOCATIONS, FEATURE_KINDS, HAIR_COLORS, rank_found, rank_missing  # noqa: E402
 
 APP_DIR = Path(__file__).resolve().parent
 APP_NAME = "Kinfind"
 RESPONDER_KEY = os.environ.get("RESPONDER_KEY", "responder-demo")
-MAX_PHOTO_BYTES = 8 * 1024 * 1024
+MAX_PHOTO_BYTES = limits.MAX_PHOTO_BYTES
 PHOTO_TYPES = {"image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp"}
 REF_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"  # no 0/O, 1/I/L
 GDACS_SYNC_MINUTES = float(os.environ.get("GDACS_SYNC_MINUTES", "60"))  # 0 turns the sync off
@@ -75,7 +75,7 @@ async def lifespan(_app: FastAPI):
 app = FastAPI(title=APP_NAME, lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=APP_DIR / "static"), name="static")
 templates = Jinja2Templates(directory=APP_DIR / "templates")
-templates.env.globals.update(app_name=APP_NAME, feature_kinds=FEATURE_KINDS, body_locations=BODY_LOCATIONS,
+templates.env.globals.update(max_record_photos=limits.MAX_RECORD_PHOTOS, app_name=APP_NAME, feature_kinds=FEATURE_KINDS, body_locations=BODY_LOCATIONS,
                              hair_colors=HAIR_COLORS)
 
 
@@ -101,6 +101,16 @@ templates.env.tests["illustration_ready"] = illustration_ready  # {{ ids|reject(
 templates.env.filters["illustration_failure"] = illustrate.failure
 
 
+async def _reject(scope, receive, send, status: int, message: str, headers: dict) -> None:
+    """Error page for requests stopped by app/limits.py (rate or size limits)."""
+    response = render(Request(scope, receive), "error.html", status_code=status, message=message)
+    response.headers.update(headers)
+    await response(scope, receive, send)
+
+
+app.add_middleware(limits.RequestLimits, reject=_reject)
+
+
 def render(request: Request, name: str, status_code: int = 200, **ctx):
     ctx["is_responder"] = is_responder(request)
     ctx["photo_view"] = photo_view(request)
@@ -112,7 +122,9 @@ async def http_error(request: Request, exc: StarletteHTTPException):
     if exc.status_code == 303:
         return RedirectResponse(exc.headers["Location"], status_code=303)
     message = exc.detail if exc.status_code != 404 or exc.detail != "Not Found" else "Page not found."
-    return render(request, "error.html", status_code=exc.status_code, message=message)
+    response = render(request, "error.html", status_code=exc.status_code, message=message)
+    response.headers.update(exc.headers or {})
+    return response
 
 
 # --- helpers -----------------------------------------------------------------
@@ -151,7 +163,16 @@ def _upload(value):
     return value if getattr(value, "filename", None) else None
 
 
+def check_photo_count(form) -> None:
+    """Size is capped by app/limits.py; this caps how many photos one record can carry."""
+    count = sum(1 for u in form.getlist("photos") + form.getlist("feature_photo") if _upload(u))
+    if count > limits.MAX_RECORD_PHOTOS:
+        raise HTTPException(400, f"Please add at most {limits.MAX_RECORD_PHOTOS} photos ({count} were added).")
+
+
 def parse_features(form) -> list[dict]:
+    if len(form.getlist("feature_kind")) > limits.MAX_FEATURES:
+        raise HTTPException(400, f"Please list at most {limits.MAX_FEATURES} distinctive features.")
     rows = zip(form.getlist("feature_kind"), form.getlist("feature_location"),
                form.getlist("feature_text"))
     photos = form.getlist("feature_photo")
@@ -321,6 +342,7 @@ async def create_missing(request: Request, background: BackgroundTasks):
     reporter_contact = _text(form.get("reporter_contact"), 200)
     if not (full_name and reporter_name and reporter_contact):
         raise HTTPException(400, "Name of the missing person and your contact details are required.")
+    check_photo_count(form)
 
     ref, token = new_ref("MP"), secrets.token_urlsafe(24)
     with db.session() as conn:
@@ -416,25 +438,8 @@ async def request_verification(request: Request, ref: str, found_ref: str):
 # family's details, and their own contact is shown to responders only.
 
 TIP_CONDITIONS = {"well": "Seemed well", "needs_help": "Injured or needed help", "unsure": "Not sure"}
-MAX_TIP_PHOTOS = 4
-RATE_LIMITS = {  # (requests, seconds) per IP address. In memory: resets on restart.
-    "tip": (5, 600),
-    "checkin": (10, 600),
-    "safe_search": (20, 600),  # stops people guessing phone numbers to find someone
-}
-_recent_requests: dict[tuple[str, str], list[float]] = {}
+MAX_TIP_PHOTOS = limits.MAX_TIP_PHOTOS
 templates.env.globals["tip_conditions"] = TIP_CONDITIONS
-
-
-def _rate_limited(request: Request, bucket: str) -> bool:
-    limit, window = RATE_LIMITS[bucket]
-    key, now = (bucket, request.client.host if request.client else "unknown"), time.time()
-    recent = [t for t in _recent_requests.get(key, []) if now - t < window]
-    _recent_requests[key] = recent
-    if len(recent) >= limit:
-        return True
-    recent.append(now)
-    return False
 
 
 def _load_appeal(conn, ref: str):
@@ -539,8 +544,6 @@ async def create_tip(request: Request, ref: str):
     photos = [u for u in map(_upload, form.getlist("photos")) if u]
     if len(photos) > MAX_TIP_PHOTOS:
         raise HTTPException(400, f"Please send at most {MAX_TIP_PHOTOS} photos.")
-    if _rate_limited(request, "tip"):
-        raise HTTPException(429, "You've sent several tips in a short time. Please wait a few minutes and try again.")
     seen_at = _text(form.get("seen_at"), 16)
     if seen_at and not re.fullmatch(r"\d{4}-\d{2}-\d{2}(T\d{2}:\d{2})?", seen_at):
         seen_at = None
@@ -611,8 +614,6 @@ async def create_checkin(request: Request):
         raise HTTPException(400, "Please enter a phone number your family knows, so they can find you.")
     if len(people) > MAX_COMPANIONS + 1:
         raise HTTPException(400, f"You can list up to {MAX_COMPANIONS} people with you.")
-    if _rate_limited(request, "checkin"):
-        raise HTTPException(429, "Several check-ins were sent from here in a short time. Please wait a few minutes.")
     token = secrets.token_urlsafe(24)
     with db.session() as conn:
         cur = conn.execute("INSERT INTO checkins (token, disaster_id, message, place, share_place) VALUES (?, ?, ?, ?, ?)",
@@ -656,8 +657,6 @@ async def find_safe(request: Request):
     query = {"name": _text(form.get("name"), 200) or "", "phone": _text(form.get("phone"), 40) or ""}
     if not query["name"] or not safe.phone_key(query["phone"]):
         raise HTTPException(400, "Enter the person's full name and their phone number.")
-    if _rate_limited(request, "safe_search"):
-        raise HTTPException(429, "Too many searches from here in a short time. Please wait a few minutes.")
     with db.session() as conn:
         results = safe.find(conn, query["name"], query["phone"])
         return render(request, "safe.html", zones=disasters(conn), selected=0, results=results, query=query)
@@ -797,6 +796,7 @@ async def create_found(request: Request, background: BackgroundTasks):
     status = _choice(form.get("status"), ("alive", "deceased"))
     if not (found_place and status):
         raise HTTPException(400, "Where the person was found and their status are required.")
+    check_photo_count(form)
     age_min, age_max = _int(form.get("age_min"), 0, 120), _int(form.get("age_max"), 0, 120)
     if age_min is not None and age_max is not None and age_min > age_max:
         age_min, age_max = age_max, age_min
