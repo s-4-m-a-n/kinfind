@@ -19,7 +19,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -75,7 +75,9 @@ async def lifespan(_app: FastAPI):
 app = FastAPI(title=APP_NAME, lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=APP_DIR / "static"), name="static")
 templates = Jinja2Templates(directory=APP_DIR / "templates")
-templates.env.globals.update(max_record_photos=limits.MAX_RECORD_PHOTOS, app_name=APP_NAME, feature_kinds=FEATURE_KINDS, body_locations=BODY_LOCATIONS,
+# Changes whenever a static file changes, so browsers fetch the new CSS/JS instead of a cached copy.
+ASSET_VERSION = str(int(max(f.stat().st_mtime for f in (APP_DIR / "static").iterdir())))
+templates.env.globals.update(asset_v=ASSET_VERSION, max_record_photos=limits.MAX_RECORD_PHOTOS, app_name=APP_NAME, feature_kinds=FEATURE_KINDS, body_locations=BODY_LOCATIONS,
                              hair_colors=HAIR_COLORS)
 
 
@@ -303,12 +305,47 @@ def logout():
 
 # --- families ----------------------------------------------------------------
 
+ZONE_PAGE = 20
+
+
+def zone_count(conn) -> int:
+    return conn.execute("SELECT COUNT(*) FROM disasters WHERE status = 'active'").fetchone()[0]
+
+
 @app.get("/")
 def home(request: Request):
+    # The map and the full zone list load /zones.json in the browser; the page itself only
+    # lists the newest few, so it stays small and works without JavaScript.
     with db.session() as conn:
-        zones = [dict(d) for d in disasters(conn)]
-        appeals = public_appeals(conn, limit=6)
-    return render(request, "index.html", zones=zones, appeals=appeals)
+        recent = conn.execute("SELECT * FROM disasters WHERE status = 'active' ORDER BY id DESC LIMIT 8").fetchall()
+        return render(request, "index.html", recent_zones=recent, zone_total=zone_count(conn),
+                      appeals=public_appeals(conn, limit=6))
+
+
+@app.get("/zones.json")
+def zones_json():
+    """Every active zone with a location, as compact rows: [id, name, region, lat, lng, radius_km, since]."""
+    with db.session() as conn:
+        rows = conn.execute("""SELECT id, name, region, lat, lng, radius_km, COALESCE(started_on, substr(created_at, 1, 10))
+                               FROM disasters WHERE status = 'active' AND lat IS NOT NULL ORDER BY id DESC""").fetchall()
+    return JSONResponse({"zones": [list(r) for r in rows]}, headers={"Cache-Control": "public, max-age=60"})
+
+
+@app.get("/zones")
+def zones_page(request: Request, q: str = "", page: int = 1):
+    """All active zones, searchable and paged, for browsing without the map."""
+    q, page = q.strip()[:100], max(1, page)
+    where, args = "status = 'active'", []
+    for word in q.split()[:6]:
+        where += " AND (name LIKE ? ESCAPE '\\' OR region LIKE ? ESCAPE '\\')"
+        like = "%" + word.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+        args += [like, like]
+    with db.session() as conn:
+        total = conn.execute(f"SELECT COUNT(*) FROM disasters WHERE {where}", args).fetchone()[0]
+        rows = conn.execute(f"SELECT * FROM disasters WHERE {where} ORDER BY id DESC LIMIT ? OFFSET ?",
+                            args + [ZONE_PAGE, (page - 1) * ZONE_PAGE]).fetchall()
+    return render(request, "zones_page.html", zones=rows, q=q, page=page, total=total,
+                  pages=max(1, -(-total // ZONE_PAGE)))
 
 
 @app.get("/missing/new")
@@ -320,9 +357,7 @@ def missing_form(request: Request, disaster: int = 0, proposed: int = 0):
 
 @app.get("/zones/new")
 def propose_zone_form(request: Request):
-    with db.session() as conn:
-        zones = [dict(d) for d in disasters(conn)]
-    return render(request, "disaster_form.html", zones=zones, public=True)
+    return render(request, "disaster_form.html", public=True)
 
 
 @app.post("/zones")
@@ -721,9 +756,7 @@ def found_form(request: Request, disaster: int = 0):
 @app.get("/responder/disasters/new")
 def disaster_form(request: Request):
     require_responder(request)
-    with db.session() as conn:
-        zones = [dict(d) for d in disasters(conn)]
-    return render(request, "disaster_form.html", zones=zones)
+    return render(request, "disaster_form.html")
 
 
 @app.post("/responder/disasters")
@@ -743,9 +776,9 @@ def zone_review(request: Request, synced: str = ""):
             SELECT d.*, (SELECT COUNT(*) FROM missing_reports m WHERE m.disaster_id = d.id) AS reports
             FROM disasters d WHERE status = 'pending'
             ORDER BY source = 'public' DESC, alert_level = 'Red' DESC, id DESC""")]
-        active = [dict(d) for d in disasters(conn)]
-    return render(request, "zones_review.html", pending=pending, active=active, synced=synced,
-                  zones=pending + active)
+        active = [dict(d) for d in disasters(conn)]  # for the merge dropdown
+    # The map shows pending zones from the page and active ones (grey) from /zones.json.
+    return render(request, "zones_review.html", pending=pending, active=active, synced=synced, zones=pending)
 
 
 @app.post("/responder/zones/sync")

@@ -6,7 +6,7 @@
   <meta name="robots" content="noindex">
   <title>{% block title %}{{ app_name }}{% endblock %}</title>
   {% block head %}{% endblock %}
-  <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/style.css?v={{ asset_v }}">
 </head>
 <body>
   {% set path = request.url.path %}
@@ -166,6 +166,27 @@
           t.textContent = "Copied ✓"; setTimeout(() => (t.textContent = "Copy link"), 2000);
         }, () => field.select());
       }
+    });
+
+    // Long zone dropdowns get a "type to filter" box (thousands of zones don't fit in a plain list).
+    document.querySelectorAll("select[data-filterable]").forEach((select) => {
+      if (select.options.length <= 13) return;
+      const input = Object.assign(document.createElement("input"), {
+        type: "search", placeholder: `Type to filter ${select.options.length - 1} zones…`, className: "select-filter",
+      });
+      input.setAttribute("aria-label", "Filter the list of zones");
+      select.before(input);
+      input.addEventListener("input", () => {
+        const words = input.value.toLowerCase().split(/\s+/).filter(Boolean);
+        let first = null, count = 0;
+        for (const opt of select.options) {
+          if (!opt.value) continue;
+          const ok = words.every((w) => opt.text.toLowerCase().includes(w));
+          opt.hidden = !ok;
+          if (ok) { count++; first = first || opt; }
+        }
+        if (count === 1 || (first && select.selectedOptions[0]?.hidden)) select.value = first.value;
+      });
     });
 
     // Prevent double submits while large photos upload.

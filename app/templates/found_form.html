@@ -11,7 +11,7 @@
     <legend><span class="step">1</span>Where &amp; when</legend>
     <div class="grid">
       <label><span>Disaster <span class="req" aria-hidden="true">*</span></span>
-        <select name="disaster_id" required>
+        <select name="disaster_id" required data-filterable>
           <option value="">Choose…</option>
           {% for d in disasters %}<option value="{{ d.id }}" {% if d.id == selected %}selected{% endif %}>{{ d.name }} — {{ d.region }}</option>{% endfor %}
         </select>

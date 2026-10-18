@@ -126,7 +126,9 @@ def test_disaster_zones_on_home_map():
     with TestClient(app) as client:
         seed.run()
         home = client.get("/").text
-        assert "Koshi River Flood 2026" in home and '"lat": 26.62' in home
+        assert "Koshi River Flood 2026" in home and 'data-src="/zones.json"' in home
+        feed = client.get("/zones.json").json()["zones"]
+        assert any(z[1] == "Koshi River Flood 2026" and z[3] == 26.62 for z in feed)
         assert "/responder/disasters/new" not in home  # families can't add zones
 
         zone = {"name": "Test Quake <b>", "region": "Somewhere", "lat": "10.5", "lng": "-70.25", "radius_km": "50"}
@@ -137,7 +139,8 @@ def test_disaster_zones_on_home_map():
         assert client.post("/responder/disasters", data={**zone, "lat": "95"}).status_code == 400
         assert client.post("/responder/disasters", data=zone, follow_redirects=False).status_code == 303
         home = client.get("/").text
-        assert "Test Quake &lt;b&gt;" in home and "<b>" not in home.split("zone-data")[1].split("</script>")[0]
+        assert "Test Quake &lt;b&gt;" in home and "Test Quake <b>" not in home
+        assert any(z[1] == "Test Quake <b>" for z in client.get("/zones.json").json()["zones"])  # JSON, shown as text
 
         did = re.search(r'/missing/new\?disaster=(\d+)"', home.split("Test Quake")[1]).group(1)
         form = client.get(f"/missing/new?disaster={did}").text

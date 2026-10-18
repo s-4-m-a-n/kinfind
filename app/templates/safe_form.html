@@ -11,7 +11,7 @@
   <fieldset>
     <legend><span class="step">1</span>Where you were affected</legend>
     <label><span>Which disaster? <span class="req" aria-hidden="true">*</span></span>
-      <select name="disaster_id" required>
+      <select name="disaster_id" required data-filterable>
         <option value="">Choose…</option>
         {% for d in disasters %}<option value="{{ d.id }}" {% if d.id == selected %}selected{% endif %}>{{ d.name }} — {{ d.region }}</option>{% endfor %}
       </select>

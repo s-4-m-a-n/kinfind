@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% import "_map_assets.html" as map_assets %}
 {% block head %}{{ map_assets.head() }}{% endblock %}
-{% block scripts %}{{ map_assets.scripts(zones) }}{% endblock %}
+{% block scripts %}{{ map_assets.scripts() }}{% endblock %}
 {% block content %}
 <section class="hero">
   <p class="eyebrow">For families after a flood, earthquake or landslide</p>
@@ -17,7 +17,7 @@
 
 <section id="zones" class="zones" aria-labelledby="zones-title">
   <div class="row-between">
-    <h2 id="zones-title">Affected zones <span class="count">{{ zones|length }}</span></h2>
+    <h2 id="zones-title">Affected zones <span class="count" data-zone-total>{{ zone_total }}</span></h2>
     <button type="button" class="secondary near-me" data-near-me hidden>
       <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M12 2v3m0 14v3M2 12h3m14 0h3"/><circle cx="12" cy="12" r="6" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="12" cy="12" r="2" fill="currentColor"/></svg>
       Zones near me
@@ -25,32 +25,40 @@
   </div>
   <p class="hint">Choose the area where the person was last seen. Your report is matched only with people found in that zone.</p>
   <p class="near-status" data-near-status aria-live="polite" hidden></p>
-  <div id="zone-map" class="map" data-mode="browse" data-responder="{{ 1 if is_responder else 0 }}"
+  <div id="zone-map" class="map" data-mode="browse" data-src="/zones.json" data-tz-src="/static/tz_coords.json?v={{ asset_v }}" data-responder="{{ 1 if is_responder else 0 }}"
        role="region" aria-label="World map of disaster-affected zones">
     <p class="map-fallback">The map could not load. Choose a zone from the list below.</p>
   </div>
-  {% if zones %}
-  <ul class="zone-list">
-    {% for z in zones %}
-    <li data-zone-id="{{ z.id }}">
-      <span class="zone-dot" aria-hidden="true"></span>
-      <div class="zone-name">
-        <strong>{{ z.name }}</strong>
-        <small>{{ z.region }}{% if z.lat is none %} · not on the map yet{% endif %}<span class="zone-distance"></span></small>
-      </div>
-      <div class="zone-actions">
-        {% if z.lat is not none %}<button type="button" class="link" data-show-zone="{{ z.id }}">Show on map</button>{% endif %}
-        <a class="button small" href="/missing/new?disaster={{ z.id }}">Report missing</a>
-        <a class="button small secondary" href="/safe/new?disaster={{ z.id }}">I'm safe</a>
-        {% if is_responder %}<a class="button small secondary" href="/responder/found/new?disaster={{ z.id }}">Log found</a>{% endif %}
-      </div>
-    </li>
-    {% endfor %}
-  </ul>
-  {% else %}
-  <p class="empty">No disaster zones are open yet. Responders add a zone when they start recording people in an area.</p>
-  {% endif %}
-  <p class="suggest-zone">Can't find your area? <a href="/zones/new">Suggest a new disaster zone →</a>
+
+  <div class="zone-browser">
+    <div class="zone-tools" hidden>
+      <label class="zone-search"><span class="sr-only">Search zones</span>
+        <input type="search" data-zone-search placeholder="Search zones: a place, country or disaster (e.g. flood, Nepal)" autocomplete="off">
+      </label>
+      <button type="button" class="secondary" data-zone-world>Whole world</button>
+    </div>
+    <p class="zone-summary" data-zone-summary aria-live="polite">{% if zone_total > recent_zones|length %}Newest {{ recent_zones|length }} of {{ zone_total }} zones{% endif %}</p>
+    {% if recent_zones %}
+    <ul class="zone-list">
+      {% for z in recent_zones %}
+      <li>
+        <span class="zone-dot" aria-hidden="true"></span>
+        <div class="zone-name"><strong>{{ z.name }}</strong><small>{{ z.region }}</small></div>
+        <div class="zone-actions">
+          {% if z.lat is not none %}<a class="link" href="/?zone={{ z.id }}#zones" data-show-zone="{{ z.id }}">Show on map</a>{% endif %}
+          <a class="button small" href="/missing/new?disaster={{ z.id }}">Report missing</a>
+          <a class="button small secondary" href="/safe/new?disaster={{ z.id }}">I'm safe</a>
+          {% if is_responder %}<a class="button small secondary" href="/responder/found/new?disaster={{ z.id }}">Log found</a>{% endif %}
+        </div>
+      </li>
+      {% endfor %}
+    </ul>
+    <button type="button" class="secondary zone-more" data-zone-more hidden>Show more</button>
+    {% else %}
+    <p class="empty">No disaster zones are open yet. Responders add a zone when they start recording people in an area.</p>
+    {% endif %}
+  </div>
+  <p class="suggest-zone"><a href="/zones">Browse all {{ zone_total }} zones</a> · Can't find your area? <a href="/zones/new">Suggest a new disaster zone →</a>
     {% if is_responder %}· <a href="/responder/zones">Review suggested zones</a>{% endif %}</p>
 </section>
 

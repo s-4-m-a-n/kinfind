@@ -2,7 +2,7 @@
 {% import "_map_assets.html" as map_assets %}
 {% block title %}{{ 'Suggest a disaster zone' if public else 'Add a disaster zone' }} · {{ app_name }}{% endblock %}
 {% block head %}{{ map_assets.head() }}{% endblock %}
-{% block scripts %}{{ map_assets.scripts(zones) }}{% endblock %}
+{% block scripts %}{{ map_assets.scripts() }}{% endblock %}
 {% block content %}
 <p class="back"><a href="{{ '/#zones' if public else '/responder' }}">← {{ 'Back to the map' if public else 'Dashboard' }}</a></p>
 <header class="page-head">
@@ -37,7 +37,7 @@
     <p class="hint">Click the centre of the affected area on the map, then set how far it reaches.
       {% if public %}Zones already on the map are shown in grey. If yours is one of them, <a href="/#zones">choose it there</a> instead.
       {% else %}Existing zones are shown in grey.{% endif %}</p>
-    <div id="zone-map" class="map tall" data-mode="pick" role="region" aria-label="Map: click to place the zone">
+    <div id="zone-map" class="map tall" data-mode="pick" data-src="/zones.json" role="region" aria-label="Map: click to place the zone">
       <p class="map-fallback">The map could not load. Enter the coordinates below instead.</p>
     </div>
     <div class="grid">

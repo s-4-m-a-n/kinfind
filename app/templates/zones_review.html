@@ -21,7 +21,7 @@
 {% if synced == 'error' %}<p class="notice" role="status">Couldn't reach GDACS just now. It is checked again automatically every hour.</p>
 {% elif synced %}<p class="notice" role="status">GDACS checked: {{ synced }} new suggestion{{ '' if synced == '1' else 's' }}.</p>{% endif %}
 
-<div id="zone-map" class="map" data-mode="review" role="region" aria-label="Map of zones awaiting review">
+<div id="zone-map" class="map" data-mode="review" data-src="/zones.json" role="region" aria-label="Map of zones awaiting review">
   <p class="map-fallback">The map could not load.</p>
 </div>
 

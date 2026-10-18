@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}All disaster zones · {{ app_name }}{% endblock %}
+{% block content %}
+<p class="back"><a href="/#zones">← Back to the map</a></p>
+<header class="page-head">
+  <h1>All disaster zones</h1>
+  <p class="lede">Every open disaster zone, newest first. Search by place, country or type of disaster.</p>
+</header>
+
+<form method="get" action="/zones" class="filter-row" role="search">
+  <label class="grow">Search <input type="search" name="q" value="{{ q }}" placeholder="e.g. flood Nepal" autocomplete="off"></label>
+  <button class="secondary">Search</button>
+  {% if q %}<a href="/zones">Clear</a>{% endif %}
+</form>
+
+<p class="zone-summary">{{ total }} zone{{ '' if total == 1 else 's' }}{% if q %} match “{{ q }}”{% endif %}{% if pages > 1 %} · page {{ page }} of {{ pages }}{% endif %}</p>
+{% if zones %}
+<ul class="zone-list">
+  {% for z in zones %}
+  <li>
+    <span class="zone-dot" aria-hidden="true"></span>
+    <div class="zone-name"><strong>{{ z.name }}</strong>
+      <small>{{ z.region }}{% if z.started_on %} · since {{ z.started_on }}{% endif %}</small></div>
+    <div class="zone-actions">
+      {% if z.lat is not none %}<a class="link" href="/?zone={{ z.id }}#zones">Show on map</a>{% endif %}
+      <a class="button small" href="/missing/new?disaster={{ z.id }}">Report missing</a>
+      <a class="button small secondary" href="/safe/new?disaster={{ z.id }}">I'm safe</a>
+      {% if is_responder %}<a class="button small secondary" href="/responder/found/new?disaster={{ z.id }}">Log found</a>{% endif %}
+    </div>
+  </li>
+  {% endfor %}
+</ul>
+{% else %}
+<p class="empty">No zones match. Try another word, or <a href="/zones/new">suggest a new zone</a>.</p>
+{% endif %}
+
+{% if pages > 1 %}
+<nav class="pager" aria-label="Pages">
+  {% if page > 1 %}<a class="button secondary small" href="/zones?q={{ q|urlencode }}&amp;page={{ page - 1 }}">← Newer</a>{% endif %}
+  <span>Page {{ page }} of {{ pages }}</span>
+  {% if page < pages %}<a class="button secondary small" href="/zones?q={{ q|urlencode }}&amp;page={{ page + 1 }}">Older →</a>{% endif %}
+</nav>
+{% endif %}
+{% endblock %}

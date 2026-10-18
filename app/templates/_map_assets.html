@@ -1,7 +1,10 @@
-{# Leaflet + the zones script. Include once per page that has a #zone-map. #}
-{% macro head() %}<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">{% endmacro %}
-{% macro scripts(zones) %}
-<script type="application/json" id="zone-data">{{ zones|tojson }}</script>
+{# Leaflet (+ marker clustering) and the zones script. Include once per page that has a #zone-map.
+   `zones` is embedded in the page; maps can also load zones from their data-src URL. #}
+{% macro head() %}<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/MarkerCluster.css">{% endmacro %}
+{% macro scripts(zones=none) %}
+{% if zones is not none %}<script type="application/json" id="zone-data">{{ zones|tojson }}</script>{% endif %}
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
-<script src="/static/zones.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/leaflet.markercluster.js"></script>
+<script src="/static/zones.js?v={{ asset_v }}"></script>
 {% endmacro %}

@@ -18,7 +18,7 @@
   <fieldset>
     <legend><span class="step">1</span>Disaster</legend>
     <label><span>Which disaster or area? <span class="req" aria-hidden="true">*</span></span>
-      <select name="disaster_id" required>
+      <select name="disaster_id" required data-filterable>
         <option value="">Choose…</option>
         {% for d in disasters %}<option value="{{ d.id }}" {% if d.id == selected %}selected{% endif %}>{{ d.name }} — {{ d.region }}{% if d.status == 'pending' %} (awaiting review){% endif %}</option>{% endfor %}
       </select>

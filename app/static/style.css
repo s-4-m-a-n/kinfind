@@ -439,3 +439,21 @@ label.check input { width: auto; min-height: 0; margin-top: .25rem; }
 .stats a span { color: var(--muted); font-size: .88rem; }
 .stats a strong { font-size: 1.6rem; line-height: 1.2; }
 .safe-people { margin-bottom: 1.5rem; }
+
+/* zone browser: clusters, search, paging */
+.zone-cluster { display: grid; place-items: center; border-radius: 50%; background: color-mix(in srgb, var(--zone) 85%, transparent);
+  color: #fff; font-weight: 700; font-size: .8rem; border: 2px solid #fff; box-shadow: 0 0 0 4px color-mix(in srgb, var(--zone) 30%, transparent); }
+.zone-cluster span { line-height: 1; }
+.zone-tools { margin-bottom: .5rem; display: flex; gap: .5rem; }
+.zone-tools[hidden] { display: none; }
+.zone-tools .zone-search { flex: 1; }
+.zone-tools button { white-space: nowrap; }
+.zone-search input { width: 100%; }
+.zone-summary { font-size: .88rem; color: var(--muted); margin: 0 0 .5rem; }
+.zone-more { margin-top: .5rem; }
+.zone-more[hidden] { display: none; }
+.zone-list .empty { justify-content: center; }
+.zone-actions a.link { color: var(--accent); text-decoration: none; padding: 0 .2rem; }
+.pager { display: flex; gap: 1rem; align-items: center; justify-content: center; margin-top: 1.25rem; color: var(--muted); font-size: .9rem; }
+.filter-row label.grow { flex: 1; }
+.select-filter { margin-bottom: .35rem; }

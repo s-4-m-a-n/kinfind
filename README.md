@@ -18,7 +18,7 @@ RESPONDER_KEY=change-me uvicorn app.main:app --reload --port 8765
 ```
 
 - Family: http://localhost:8765 → *Report a missing person*. The case page has a private link, and that link is the only way back to the case.
-- Home page: a world map of disaster zones. *Zones near me* sorts them by distance using the browser's location, which never leaves the browser. Choosing a zone opens the report form with that disaster already selected.
+- Home page: a world map of disaster zones that stays usable with thousands of them. Pins are grouped into clusters that split apart as you zoom in, and affected-area circles are drawn only once zoomed in. The map opens near the visitor, using the browser's time zone (e.g. `Asia/Kathmandu` → Kathmandu) with the closest few zones in view, so people in Nepal see Nepal's disasters first. No permission prompt is needed and nothing is sent anywhere. The lookup table `app/static/tz_coords.json` is built from the public tz database by `tools/build_tz_coords.py`. The list under the map shows the zones in the area you are looking at, nearest first, 8 at a time. A search box filters zones by place, country or type of disaster, and *Zones near me* sorts them by distance from you (your location never leaves the browser). Zones load from `/zones.json`, a compact cached feed, so the page itself stays small. `/zones` lists every zone with search and pages and works without JavaScript. Choosing a zone opens the report form with that disaster already selected, and long zone dropdowns on forms get a type-to-filter box.
 - New zones come from three places: responders add them directly, families suggest one at `/zones/new`, and the server pulls Orange and Red alerts from [GDACS](https://www.gdacs.org) every hour (`GDACS_SYNC_MINUTES`; `0` turns it off). Suggestions wait at `/responder/zones` until a responder approves, merges or rejects them. Families can report into a zone they suggested while it is still awaiting review.
 - Settings such as `OPENROUTER_API_KEY` go in a `.env` file in the project root. Copy `.env.example` to start; `.env` is git-ignored and read when the server starts.
 - Responder: http://localhost:8765/responder/login. The key comes from `RESPONDER_KEY` and defaults to `responder-demo`.
@@ -112,6 +112,7 @@ app/gdacs.py      suggested zones from GDACS alerts
 app/ai_match.py   AI photo check: describe -> screen -> compare
 app/safe.py       "I'm safe" check-ins: name + phone matching
 app/sketch.py     exact pencil-sketch versions of photos
+tools/            build_tz_coords.py: time zone -> city coordinates for the home map
 app/illustrate.py colour illustrations of deceased people's photos (AI)
 tests/            matching unit tests + end-to-end privacy test
 ```
