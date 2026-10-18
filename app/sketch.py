@@ -23,7 +23,8 @@ def make_sketch(src: Path, dest: Path, radius: float = 10, shade: float = 0.45) 
     gray = ImageOps.autocontrast(ImageOps.grayscale(im), cutoff=1)
     # Colour-dodge the image with its blurred inverse: flat areas go white, edges become pencil lines.
     blur = ImageOps.invert(gray).filter(ImageFilter.GaussianBlur(radius))
-    lines = ImageMath.eval("convert(float(a) * 255 / (256 - float(b)), 'L')", a=gray, b=blur)
+    lines = ImageMath.lambda_eval(  # ImageMath.eval was removed in Pillow 12
+        lambda e: e["convert"](e["float"](e["a"]) * 255 / (256 - e["float"](e["b"])), "L"), a=gray, b=blur)
     lines = ImageOps.autocontrast(lines, cutoff=1)
     # Light grey shading so filled ink (colour tattoos, birthmarks) still reads; skin stays pale.
     tone = gray.point(lambda v: int(255 - (255 - v) * shade))

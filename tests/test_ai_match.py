@@ -7,13 +7,16 @@ import tempfile
 os.environ.setdefault("DISASTERLENS_DATA", tempfile.mkdtemp())
 os.environ["GDACS_SYNC_MINUTES"] = "0"
 os.environ["OPENROUTER_API_KEY"] = ""
-os.environ.setdefault("RESPONDER_KEY", "test-key")
+os.environ.setdefault("ADMIN_EMAIL", "admin@test.local")
+os.environ.setdefault("ADMIN_PASSWORD", "test-password")
 
 from fastapi.testclient import TestClient  # noqa: E402
 from PIL import Image  # noqa: E402
 
 from app import ai_match, illustrate, seed  # noqa: E402
-from app.main import RESPONDER_KEY, app  # noqa: E402
+from app.main import app  # noqa: E402
+
+LOGIN = {"email": os.environ["ADMIN_EMAIL"], "password": os.environ["ADMIN_PASSWORD"]}
 
 
 def _png(color) -> bytes:
@@ -49,7 +52,7 @@ def test_pipeline_describes_screens_then_compares_shortlist(monkeypatch):
     monkeypatch.setattr(illustrate, "redraw", lambda src: _png("white"))  # no image-model calls either
     with TestClient(app) as client:
         seed.run()
-        client.post("/responder/login", data={"key": RESPONDER_KEY})
+        client.post("/responder/login", data=LOGIN)
         client.post("/responder/disasters", data={"name": "AI test zone", "region": "Nowhere",
                                                   "lat": "0", "lng": "0", "radius_km": "10"})
         zone = re.search(r'disaster=(\d+)"[^>]*>Report missing', client.get("/").text.split("AI test zone")[1]).group(1)
@@ -80,7 +83,7 @@ def test_pipeline_describes_screens_then_compares_shortlist(monkeypatch):
         assert [i for n, i in calls if n == "screen"] == [0]
         assert [i for n, i in calls if n == "photo_comparison"] == [2]  # only the shortlisted pair; no face photo
 
-        client.post("/responder/login", data={"key": RESPONDER_KEY})
+        client.post("/responder/login", data=LOGIN)
         page = client.get(match.headers["location"]).text
         assert "Same anchor and MAA lettering." in page and "91%" in page and "AI description" in page
         assert "Test Person A" not in client.get(decoy.headers["location"]).text.split('id="ai"')[1].split("</section>")[0]

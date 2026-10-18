@@ -42,6 +42,9 @@ CREATE TABLE IF NOT EXISTS missing_reports (
     -- Public appeal: the family chooses to publish a "have you seen this person?" page.
     appeal_public INTEGER NOT NULL DEFAULT 0,
     appeal_photo_id INTEGER REFERENCES photos(id),  -- the one photo shown publicly
+    -- A responder checks each appeal (and each new public photo) before it goes public, so an
+    -- abuser can't "report missing" someone who fled them and collect sightings.
+    appeal_review TEXT CHECK (appeal_review IN ('pending', 'approved', 'rejected')),
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -147,6 +150,37 @@ CREATE TABLE IF NOT EXISTS verification_requests (
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     UNIQUE (missing_id, found_id)
 );
+
+-- Responder accounts (app/accounts.py). Admins also manage the team.
+CREATE TABLE IF NOT EXISTS responders (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL,
+    email TEXT UNIQUE NOT NULL,        -- stored lower-case
+    organisation TEXT,                 -- e.g. 'Nepal Red Cross, Sunsari'
+    role TEXT NOT NULL DEFAULT 'responder' CHECK (role IN ('responder', 'admin')),
+    password_hash TEXT NOT NULL,
+    must_change_password INTEGER NOT NULL DEFAULT 1,  -- set while they hold a one-time password
+    active INTEGER NOT NULL DEFAULT 1,
+    last_login_at TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Only a hash of each session token is stored.
+CREATE TABLE IF NOT EXISTS sessions (
+    token_hash TEXT PRIMARY KEY,
+    responder_id INTEGER NOT NULL REFERENCES responders(id),
+    expires_at TEXT NOT NULL
+);
+
+-- Who did what: sign-ins, records logged, decisions, views of family contacts and unfiltered photos.
+CREATE TABLE IF NOT EXISTS audit_log (
+    id INTEGER PRIMARY KEY,
+    responder_id INTEGER REFERENCES responders(id),  -- null for failed sign-ins
+    action TEXT NOT NULL,
+    detail TEXT,
+    ip TEXT,                           -- set for sign-in attempts
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 """
 
 
@@ -167,6 +201,8 @@ MIGRATIONS = [
     ("missing_reports", "appeal_public", "INTEGER NOT NULL DEFAULT 0"),
     ("missing_reports", "appeal_photo_id", "INTEGER"),
     ("missing_reports", "person_phone", "TEXT"),
+    ("missing_reports", "appeal_review", "TEXT"),
+    ("audit_log", "ip", "TEXT"),
     ("ai_matches", "stage", "TEXT"),
     ("ai_matches", "shortlist_score", "INTEGER"),
     ("ai_matches", "shortlist_reason", "TEXT"),

@@ -91,7 +91,13 @@
 {% if kind == 'missing' %}
 <section id="tips">
   <h2>Community sightings {% if tips %}<span class="count">{{ tips|length }}</span>{% endif %}
-    {% if r.appeal_public %}<a class="pill" href="/appeal/{{ r.ref }}" target="_blank">Public appeal ↗</a>{% else %}<span class="pill">No public appeal</span>{% endif %}</h2>
+    {% if r.appeal_public and r.appeal_review == 'approved' %}<a class="pill" href="/appeal/{{ r.ref }}" target="_blank">Public appeal ↗</a>
+    {% elif r.appeal_public and r.appeal_review == 'pending' %}<span class="pill attention-pill">Appeal awaiting approval</span>
+    {% elif r.appeal_public and r.appeal_review == 'rejected' %}<span class="pill">Appeal not approved</span>
+    {% else %}<span class="pill">No public appeal</span>{% endif %}</h2>
+  {% if r.appeal_public and r.appeal_review == 'pending' %}
+    {% with a = {'ref': r.ref, 'full_name': r.full_name, 'appeal_photo_id': r.appeal_photo_id} %}{% include "_appeal_review.html" %}{% endwith %}
+  {% endif %}
   {% if tips %}
   <p class="hint">The family sees these straight away, marked unverified, except ones that are hidden. Hide anything abusive,
     fake or a scam, and mark tips you've checked so the family knows.</p>

@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}Activity · {{ app_name }}{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Activity log</h1>
+  <p class="lede">The latest {{ entries|length }} actions by responders: sign-ins, records logged, match decisions,
+    every case record opened (each shows family contact details) and every unfiltered photo viewed.</p>
+</div>
+{% if not entries %}
+  <p class="empty">Nothing yet.</p>
+{% else %}
+<div class="table-wrap"><table>
+  <thead><tr><th>When (UTC)</th><th>Who</th><th>Action</th><th>Details</th></tr></thead>
+  <tbody>
+  {% for e in entries %}
+    <tr class="{{ 'attention-row' if e.action == 'failed sign-in' }}">
+      <td><small>{{ e.created_at[:16] }}{% if e.ip %}<br>from {{ e.ip }}{% endif %}</small></td>
+      <td>{% if e.name %}{{ e.name }}<br><small>{{ e.email }}</small>{% else %}<small>Unknown</small>{% endif %}</td>
+      <td>{{ e.action|capitalize }}</td>
+      <td>{{ e.detail|ref_links }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table></div>
+{% endif %}
+{% endblock %}

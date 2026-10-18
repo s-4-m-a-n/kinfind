@@ -15,7 +15,7 @@
     <a class="brand" href="{{ '/responder' if is_responder else '/' }}">
       <svg class="brand-mark" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5" fill="none" stroke="currentColor" stroke-width="2.2"/><path d="M15.5 15.5 21 21" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/><path d="M10.5 13.6s-3-1.8-3-3.6a1.6 1.6 0 0 1 3-.8 1.6 1.6 0 0 1 3 .8c0 1.8-3 3.6-3 3.6z" fill="currentColor"/></svg>
       {{ app_name }}
-      {% if is_responder %}<span class="badge">Responder</span>{% endif %}
+      {% if is_responder %}<span class="badge">{{ 'Admin' if user.role == 'admin' else 'Responder' }}</span>{% endif %}
     </a>
     <nav aria-label="Main">
       {% if is_responder %}
@@ -23,7 +23,11 @@
         <a href="/responder/found/new" {% if path == '/responder/found/new' %}aria-current="page"{% endif %}>Log found person</a>
         <a href="/responder/zones" {% if path == '/responder/zones' %}aria-current="page"{% endif %}>Zones</a>
         <a href="/responder/safe" {% if path == '/responder/safe' %}aria-current="page"{% endif %}>Safe</a>
-        <form method="post" action="/responder/logout"><button class="link">Sign out</button></form>
+        {% if user.role == 'admin' %}
+        <a href="/responder/team" {% if path == '/responder/team' %}aria-current="page"{% endif %}>Team</a>
+        <a href="/responder/activity" {% if path == '/responder/activity' %}aria-current="page"{% endif %}>Activity</a>
+        {% endif %}
+        <form method="post" action="/responder/logout"><button class="link" title="Signed in as {{ user.email }}">Sign out</button></form>
       {% else %}
         <a href="/missing/new" {% if path == '/missing/new' %}aria-current="page"{% endif %}>Report missing</a>
         <a href="/appeals" {% if path.startswith('/appeal') %}aria-current="page"{% endif %}>Have you seen them?</a>

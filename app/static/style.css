@@ -320,6 +320,21 @@ select.status-confirmed { color: var(--high); background: var(--high-soft); }
 button.danger { color: var(--error); }
 p.notice { margin: 0 0 1rem; }
 
+/* public appeal approval */
+.appeal-review { display: flex; gap: 1rem; align-items: flex-start; flex-wrap: wrap; margin: .5rem 0 1rem; }
+.appeal-review img { width: 96px; height: 96px; object-fit: cover; border-radius: 8px; border: 1px solid var(--line); }
+.appeal-review > div { flex: 1; min-width: 14rem; display: grid; gap: .5rem; }
+.appeal-review .hint { margin: 0; }
+.pill.attention-pill { color: var(--mid); border-color: var(--mid); background: var(--mid-soft); }
+
+/* team + activity (admins) */
+.notice.issued .facts { grid-template-columns: 6.5rem 1fr; }
+code.secret { font-size: 1.05rem; font-weight: 700; letter-spacing: .04em; user-select: all; }
+.team-actions { display: flex; flex-wrap: wrap; gap: .25rem .9rem; margin: 0; }
+.team-actions button.link { font-size: .88rem; }
+.team-note { margin-top: .75rem; }
+tr.attention-row td { background: var(--mid-soft); }
+
 /* AI photo check */
 .ai h2 .tag { font-size: .7rem; }
 .ai-results { list-style: none; padding: 0; margin: 0; display: grid; gap: .75rem; }

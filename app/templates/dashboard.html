@@ -34,6 +34,21 @@
 </ul>
 {% endif %}
 
+{% if pending_appeals %}
+<h2 id="appeals">Public appeals awaiting approval <span class="count">{{ pending_appeals|length }}</span></h2>
+<ul class="matches">
+{% for a in pending_appeals %}
+  <li class="match tip-row">
+    <div class="body">
+      <h3><a href="/responder/missing/{{ a.ref }}">{{ a.full_name }}</a> <small>{{ a.ref }} · {{ a.disaster }}</small></h3>
+      <p class="meta">Reported by {{ a.reporter_name }} · {{ a.reporter_contact }}</p>
+      {% include "_appeal_review.html" %}
+    </div>
+  </li>
+{% endfor %}
+</ul>
+{% endif %}
+
 {% if new_tips %}
 <h2>New community sightings <span class="count">{{ new_tips|length }}</span></h2>
 <ul class="matches">

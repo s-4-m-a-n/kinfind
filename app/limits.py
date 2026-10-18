@@ -4,11 +4,13 @@ Every request is matched against RULES (first match wins) to get a rate-limit bu
 the largest body it may send. Limits are per client IP address and kept in memory, so they
 reset when the server restarts and aren't shared between several server processes.
 
-Behind a reverse proxy, run uvicorn with --proxy-headers --forwarded-allow-ips=<proxy ip>
-so the real client address is used; otherwise everyone shares the proxy's limits.
+Behind a reverse proxy every request arrives from the proxy, so everyone would share one set of
+limits. Set TRUSTED_PROXY_HOPS to the number of proxies in front of the app (Cloud Run: 1) and
+the client address is read from X-Forwarded-For instead; see client_ip().
 """
 from __future__ import annotations
 
+import os
 import re
 import time
 
@@ -23,7 +25,7 @@ UPLOAD_SLACK = 1 * MB         # form fields and multipart overhead on top of the
 # Bucket name -> (requests, seconds), per IP address.
 BUCKETS = {
     "all": (600, 60),               # any request, including pages and photos: stops floods
-    "login": (10, 15 * 60),         # responder sign-in: stops key guessing
+    "login": (10, 15 * 60),         # responder sign-in: stops password guessing
     "report": (10, 60 * 60),        # new missing-person reports
     "found": (60, 10 * 60),         # responders logging found people
     "tip": (5, 10 * 60),            # community sightings
@@ -57,6 +59,23 @@ _COMPILED = [(re.compile(m), re.compile(p), bucket, size) for m, p, bucket, size
 
 _hits: dict[tuple[str, str], list[float]] = {}
 _last_prune = 0.0
+TRUSTED_PROXY_HOPS = int(os.environ.get("TRUSTED_PROXY_HOPS", "0"))
+
+
+def client_ip(scope) -> str:
+    """The visitor's address.
+
+    Each trusted proxy appends the address it received the request from to X-Forwarded-For, so
+    with N proxies the client is the Nth entry from the right. Entries further left are whatever
+    the client itself sent, and could be faked to dodge the limits, so they are ignored.
+    """
+    ip = (scope.get("client") or ("unknown", 0))[0]
+    if TRUSTED_PROXY_HOPS:
+        header = dict(scope.get("headers") or []).get(b"x-forwarded-for", b"").decode("latin-1")
+        hops = [h.strip() for h in header.split(",") if h.strip()]
+        if len(hops) >= TRUSTED_PROXY_HOPS:
+            ip = hops[-TRUSTED_PROXY_HOPS]
+    return ip
 
 
 def rule_for(method: str, path: str) -> tuple[str | None, int]:
@@ -108,7 +127,7 @@ class RequestLimits:
     async def __call__(self, scope, receive, send):
         if scope["type"] != "http" or scope["path"].startswith("/static/"):
             return await self.app(scope, receive, send)
-        ip = (scope.get("client") or ("unknown", 0))[0]
+        ip = client_ip(scope)
         bucket, max_body = rule_for(scope["method"], scope["path"])
         for b in ("all", bucket) if bucket else ("all",):
             wait = hit(b, ip)

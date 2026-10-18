@@ -13,15 +13,26 @@ contacts the family.
 
 ```bash
 pip install -r requirements.txt
-python -m app.seed                      # demo disasters + found records (optional)
-RESPONDER_KEY=change-me uvicorn app.main:app --reload --port 8765
+python -m app.seed                      # demo disasters, found records and sign-ins (optional)
+uvicorn app.main:app --reload --port 8765
 ```
 
 - Family: http://localhost:8765 → *Report a missing person*. The case page has a private link, and that link is the only way back to the case.
 - Home page: a world map of disaster zones that stays usable with thousands of them. Pins are grouped into clusters that split apart as you zoom in, and affected-area circles are drawn only once zoomed in. The map opens near the visitor, using the browser's time zone (e.g. `Asia/Kathmandu` → Kathmandu) with the closest few zones in view, so people in Nepal see Nepal's disasters first. No permission prompt is needed and nothing is sent anywhere. The lookup table `app/static/tz_coords.json` is built from the public tz database by `tools/build_tz_coords.py`. The list under the map shows the zones in the area you are looking at, nearest first, 8 at a time. A search box filters zones by place, country or type of disaster, and *Zones near me* sorts them by distance from you (your location never leaves the browser). Zones load from `/zones.json`, a compact cached feed, so the page itself stays small. `/zones` lists every zone with search and pages and works without JavaScript. Choosing a zone opens the report form with that disaster already selected, and long zone dropdowns on forms get a type-to-filter box.
 - New zones come from three places: responders add them directly, families suggest one at `/zones/new`, and the server pulls Orange and Red alerts from [GDACS](https://www.gdacs.org) every hour (`GDACS_SYNC_MINUTES`; `0` turns it off). Suggestions wait at `/responder/zones` until a responder approves, merges or rejects them. Families can report into a zone they suggested while it is still awaiting review.
 - Settings such as `OPENROUTER_API_KEY` go in a `.env` file in the project root. Copy `.env.example` to start; `.env` is git-ignored and read when the server starts.
-- Responder: http://localhost:8765/responder/login. The key comes from `RESPONDER_KEY` and defaults to `responder-demo`.
+- Responder: http://localhost:8765/responder/login. Each responder has their own account. The demo seed adds `admin@kinfind.demo` / `kinfind-admin` and `responder@kinfind.demo` / `kinfind-responder`.
+
+## Responder accounts
+
+Everything is in [app/accounts.py](app/accounts.py).
+
+- **First admin.** Set `ADMIN_EMAIL` and `ADMIN_PASSWORD` before the first start (an admin is created only while there are no accounts), or run `python -m app.accounts create-admin --email you@example.org`.
+- **Team page** (`/responder/team`, admins only). Add a responder and Kinfind makes a one-time password, shown once, for the admin to pass on privately. At first sign-in the responder must choose their own password. Admins can also reset passwords, deactivate or reactivate accounts, and make someone an admin. Admins can't change their own account there, so there is always an active admin.
+- **Sessions** last 12 hours. Signing out, changing a password, a reset or deactivation ends them. Only a hash of each session token is stored, and passwords are hashed with scrypt.
+- **Activity log** (`/responder/activity`, admins only). Records sign-ins and failed sign-ins, found people logged, match decisions, zone decisions, every missing report or found record opened (both show family contact details), and every unfiltered photo viewed. The dashboard's verification queue also shows family contacts; opening the dashboard is not logged.
+- **Password guessing.** After 5 failed sign-ins for an email within 15 minutes, sign-ins for that email are refused until the 15 minutes pass.
+- Locked out? `python -m app.accounts reset-password --email you@example.org`.
 
 Data is stored in `data/` (SQLite database + uploaded photos). Set `DISASTERLENS_DATA` to use a different folder.
 
@@ -32,6 +43,8 @@ python -m pytest -q
 ## Public appeals and community sightings
 
 A family can publish a **public appeal** from their private case page: a "Have you seen…?" page at `/appeal/<ref>` showing the name, description, last-seen details, distinctive marks and one photo they choose. It never shows their contact details or private link, and they can take it down at any time. All public appeals are listed at `/appeals` and on the home page.
+
+**A responder approves every appeal before it goes public**, from the dashboard or the missing-person record, and again whenever the family changes the public photo. Without this, anyone could "report missing" a person who fled them, such as from an abusive partner, and have the public send in sightings. Until it is approved, the appeal page, its photo and the tip form all return 404, and the family's case page says it is waiting.
 
 Anyone can send a **sighting** from an appeal: where and when (with an optional map pin), how the person seemed, a message, up to 4 photos, and an optional contact.
 
@@ -60,12 +73,21 @@ Check-ins are self-reported and never close a missing-person report.
 
 All limits live in [app/limits.py](app/limits.py): a middleware checks every request against a table of rules before it reaches a route.
 
-- **Rate limits per IP address**, for example: responder sign-in 10 per 15 minutes (stops key guessing), new missing reports 10 per hour, community tips 5 and safe searches 20 per 10 minutes, AI re-checks 10 per 10 minutes (they cost money), and any request at all 600 per minute. A blocked request gets `429` with a `Retry-After` header.
+- **Rate limits per IP address**, for example: responder sign-in 10 per 15 minutes (stops password guessing), new missing reports 10 per hour, community tips 5 and safe searches 20 per 10 minutes, AI re-checks 10 per 10 minutes (they cost money), and any request at all 600 per minute. A blocked request gets `429` with a `Retry-After` header.
 - **Request size limits**, checked against `Content-Length` first and then by counting bytes as they arrive, so chunked uploads can't get past them: 81 MB for a report or found record (10 photos × 8 MB), 33 MB for a tip (4 photos), and a few KB for text-only forms. Oversized requests get `413` before anything is stored.
 - **Per-form limits**: at most 10 photos and 20 distinctive features per record, 4 photos per tip, and 12 people per check-in. Forms also enforce the photo limit in the browser.
 - Any new form is covered automatically by the default rule.
 
-Limits are kept in memory per server process. Behind a reverse proxy, run uvicorn with `--proxy-headers --forwarded-allow-ips=<proxy ip>`, or every visitor will share the proxy's limits.
+Limits are kept in memory per server process. **Behind a reverse proxy, set `TRUSTED_PROXY_HOPS`** to the number of proxies in front of the app (Cloud Run: `1`), or every visitor will share the proxy's limits. The client address is then read from the right-hand end of `X-Forwarded-For`; addresses a client adds on the left are ignored, so they can't be used to dodge the limits.
+
+## Security
+
+- **Photos are cleaned on upload** ([app/photos.py](app/photos.py)): re-saved from their pixels alone, which removes GPS location, camera and owner details, and scaled to at most 4096 px. Images over 40 megapixels are refused, which stops decompression bombs. For photos uploaded before this, run `python -m tools.clean_uploads`.
+- **Headers on every response:** a Content-Security-Policy (only Leaflet and OpenStreetMap tiles load from elsewhere; no framing), `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: strict-origin-when-cross-origin` (other sites get only the site's origin, never a private link; OpenStreetMap's tile servers need at least that), and HSTS over HTTPS. Responder pages, case pages and check-in pages are sent with `Cache-Control: no-store`.
+- **Cookies** are HttpOnly and SameSite=Strict, and Secure whenever the site is reached over HTTPS (including behind Cloud Run, via `X-Forwarded-Proto`).
+- **Private-link keys are hidden in the access log** (`?k=` values and `/safe/c/` tokens). Your hosting platform may keep its own request logs with full URLs, so limit who can read them.
+- **Sign-in lockout** counts failures per email *and* address, so someone guessing can't lock the real responder out; a higher limit per email alone (50 in 15 minutes) stops guessing from many addresses.
+- **AI prompts** tell the model that record text comes from the public and that any instructions in it must be ignored.
 
 ## How matching works
 
@@ -111,6 +133,9 @@ app/static/zones.js  zones map (Leaflet + OpenStreetMap tiles)
 app/gdacs.py      suggested zones from GDACS alerts
 app/ai_match.py   AI photo check: describe -> screen -> compare
 app/safe.py       "I'm safe" check-ins: name + phone matching
+app/accounts.py   responder accounts, sessions, activity log
+app/photos.py     upload cleaning: strips GPS and other metadata, refuses huge images
+app/limits.py     rate and request-size limits
 app/sketch.py     exact pencil-sketch versions of photos
 tools/            build_tz_coords.py: time zone -> city coordinates for the home map
 app/illustrate.py colour illustrations of deceased people's photos (AI)
@@ -121,8 +146,8 @@ tests/            matching unit tests + end-to-end privacy test
 
 This is a prototype. Before deploying it:
 
-- Give each responder their own account and keep an audit log, instead of one shared key.
-- Use HTTPS, encrypt photos at rest, and remove EXIF data from uploads.
+- Don't run the demo seed: its sign-ins are public. Create the first admin with `ADMIN_EMAIL` / `ADMIN_PASSWORD` or `create-admin`.
+- Use HTTPS, encrypt photos at rest, and set `TRUSTED_PROXY_HOPS` for your proxy.
 - Move rate limits to shared storage (e.g. Redis) if you run more than one server process.
 - Write a data-retention policy. Check consent and legal requirements in each region.
 - Use a map tile provider that allows production traffic. The public OpenStreetMap tile servers are only for light use, and each map load sends the visitor's IP address to them.

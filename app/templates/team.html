@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% block title %}Team · {{ app_name }}{% endblock %}
+{% block content %}
+<div class="page-head row-between">
+  <div>
+    <h1>Team</h1>
+    <p class="lede">Everyone who can sign in as a responder. Each person has their own account, so the
+      <a href="/responder/activity">activity log</a> shows who did what.</p>
+  </div>
+</div>
+
+{% if error %}<p class="notice error">{{ error }}</p>{% endif %}
+{% if issued %}
+<div class="notice issued" role="status">
+  <strong>{{ 'Account created for' if issued.new else 'New one-time password for' }} {{ issued.name }}</strong>
+  <p class="hint">Give these to {{ issued.name }} privately, for example in person or by phone. The password is shown
+    only now. They choose their own password when they first sign in.</p>
+  <dl class="facts">
+    <dt>Sign in at</dt><dd>{{ request.base_url }}responder/login</dd>
+    <dt>Email</dt><dd>{{ issued.email }}</dd>
+    <dt>Password</dt><dd><code class="secret">{{ issued.password }}</code></dd>
+  </dl>
+</div>
+{% endif %}
+
+<form method="post" action="/responder/team">
+  <fieldset>
+    <legend>Add a responder</legend>
+    <div class="grid">
+      <label>Name <input name="name" required maxlength="200"></label>
+      <label>Email <input type="email" name="email" required maxlength="200"></label>
+      <label>Organisation <input name="organisation" maxlength="200" placeholder="e.g. Nepal Red Cross, Sunsari"></label>
+      <label>Role
+        <select name="role">
+          <option value="responder">Responder</option>
+          <option value="admin">Admin (can manage the team)</option>
+        </select>
+      </label>
+    </div>
+    <button>Add and create a one-time password</button>
+  </fieldset>
+</form>
+
+<h2>Accounts <span class="count">{{ team|selectattr('active')|list|length }} active</span></h2>
+<div class="table-wrap"><table>
+  <thead><tr><th>Name</th><th>Role</th><th>Last sign-in</th><th>Status</th><th></th></tr></thead>
+  <tbody>
+  {% for m in team %}
+    <tr class="{{ 'muted' if not m.active }}">
+      <td><strong>{{ m.name }}</strong>{% if m.id == user.id %} <small>(you)</small>{% endif %}<br>
+        <small>{{ m.email }}{% if m.organisation %} · {{ m.organisation }}{% endif %}</small></td>
+      <td>{{ m.role|capitalize }}</td>
+      <td>{% if m.last_login_at %}{{ m.last_login_at[:16] }} <small>UTC</small>{% else %}<small>Never</small>{% endif %}</td>
+      <td>{% if not m.active %}Deactivated{% elif m.must_change_password %}<span class="tag">Awaiting first sign-in</span>{% else %}Active{% endif %}</td>
+      <td>
+        {% if m.id != user.id %}
+        <form method="post" action="/responder/team/{{ m.id }}" class="team-actions">
+          {% if m.active %}
+            <button name="action" value="reset" class="link">Reset password</button>
+            <button name="action" value="{{ 'make-responder' if m.role == 'admin' else 'make-admin' }}" class="link">
+              {{ 'Make responder' if m.role == 'admin' else 'Make admin' }}</button>
+            <button name="action" value="deactivate" class="link danger">Deactivate</button>
+          {% else %}
+            <button name="action" value="activate" class="link">Reactivate</button>
+          {% endif %}
+        </form>
+        {% else %}
+          <a href="/responder/password">Change password</a>
+        {% endif %}
+      </td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table></div>
+<p class="hint team-note">Deactivating someone signs them out straight away. Their past actions stay in the activity log.</p>
+{% endblock %}

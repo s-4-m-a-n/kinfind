@@ -7,13 +7,16 @@ import tempfile
 os.environ.setdefault("DISASTERLENS_DATA", tempfile.mkdtemp())
 os.environ["GDACS_SYNC_MINUTES"] = "0"
 os.environ["OPENROUTER_API_KEY"] = ""
-os.environ.setdefault("RESPONDER_KEY", "test-key")
+os.environ.setdefault("ADMIN_EMAIL", "admin@test.local")
+os.environ.setdefault("ADMIN_PASSWORD", "test-password")
 
 from fastapi.testclient import TestClient  # noqa: E402
 from PIL import Image  # noqa: E402
 
 from app import limits, seed  # noqa: E402
-from app.main import RESPONDER_KEY, app  # noqa: E402
+from app.main import app  # noqa: E402
+
+LOGIN = {"email": os.environ["ADMIN_EMAIL"], "password": os.environ["ADMIN_PASSWORD"]}
 
 
 def _img(color="tan") -> bytes:
@@ -30,6 +33,13 @@ def _report(client, name, contact):
     url = resp.headers["location"]
     ref, k = re.search(r"/case/(MP-\w+)\?k=([^&]+)", url).groups()
     return ref, k
+
+
+def _approve(client, ref):
+    """A responder approves the family's appeal, which makes it public."""
+    client.post("/responder/login", data=LOGIN)
+    client.post(f"/responder/appeals/{ref}", data={"action": "approve"})
+    client.post("/responder/logout")
 
 
 def test_appeal_and_tips_flow():
@@ -52,6 +62,10 @@ def test_appeal_and_tips_flow():
         client.post(f"/case/{ref}/appeal", data={"k": k, "publish": "1", "photo_id": other_pid})
         assert client.get(f"/appeal/{ref}/photo").status_code == 404
         client.post(f"/case/{ref}/appeal", data={"k": k, "publish": "1", "photo_id": own_pid})
+        # Nothing is public until a responder approves it.
+        assert client.get(f"/appeal/{ref}").status_code == 404 and "Nima Lama" not in client.get("/appeals").text
+        assert "Waiting for a responder" in client.get(f"/case/{ref}?k={k}").text
+        _approve(client, ref)
         public = client.get(f"/appeal/{ref}").text
         assert "Have you seen Nima Lama?" in public and "Dhunche bazaar" in public
         assert client.get(f"/appeal/{ref}/photo").status_code == 200
@@ -79,7 +93,7 @@ def test_appeal_and_tips_flow():
         assert "deceased" not in case.lower()
 
         # Responders see the contact and can check or hide tips.
-        client.post("/responder/login", data={"key": RESPONDER_KEY})
+        client.post("/responder/login", data=LOGIN)
         record = client.get(f"/responder/missing/{ref}").text
         assert "tipster-777" in record and "Saw her helping" in record
         assert "Nima Lama" in client.get("/responder").text.split("New community sightings")[1]
@@ -88,7 +102,7 @@ def test_appeal_and_tips_flow():
         client.post("/responder/logout")
         assert "Checked by a responder" in client.get(f"/case/{ref}?k={k}").text
 
-        client.post("/responder/login", data={"key": RESPONDER_KEY})
+        client.post("/responder/login", data=LOGIN)
         client.post(f"/responder/tips/{tid}", data={"action": "hide"})
         assert "Hidden" in client.get(f"/responder/missing/{ref}").text  # responders still see it
         client.post("/responder/logout")
@@ -114,6 +128,7 @@ def test_tip_abuse_limits():
         seed.run()
         ref, k = _report(client, "Rate Limit", "x")
         client.post(f"/case/{ref}/appeal", data={"k": k, "publish": "1"})
+        _approve(client, ref)
 
         # Bots filling the hidden honeypot field are thanked but nothing is stored.
         client.post(f"/appeal/{ref}/tips", data={"message": "spam", "website": "http://spam"})

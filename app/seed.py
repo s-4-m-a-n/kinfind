@@ -1,6 +1,12 @@
-"""Load demo disasters and found records:  python -m app.seed"""
-from . import db
+"""Load demo disasters, found records and accounts:  python -m app.seed"""
+from . import accounts, db
 from .main import new_ref
+
+# Demo sign-ins (email, name, role, password). Demo data only: never seed a real deployment.
+ACCOUNTS = [
+    ("admin@kinfind.demo", "Demo Admin", "admin", "kinfind-admin"),
+    ("responder@kinfind.demo", "Demo Responder", "responder", "kinfind-responder"),
+]
 
 # (name, region, lat, lng, radius_km)
 DISASTERS = [
@@ -39,6 +45,10 @@ def run() -> None:
         conn.executemany("""UPDATE disasters SET lat=?, lng=?, radius_km=?
                             WHERE name=? AND region=? AND lat IS NULL""",
                          [(lat, lng, r, name, region) for name, region, lat, lng, r in DISASTERS])
+        if not conn.execute("SELECT 1 FROM responders").fetchone():
+            for email, name, role, password in ACCOUNTS:
+                accounts.create(conn, name, email, role, "Kinfind demo", password=password, must_change=False)
+            print("Demo sign-ins: " + ", ".join(f"{e} / {p}" for e, _, _, p in ACCOUNTS))
         if conn.execute("SELECT COUNT(*) FROM disasters").fetchone()[0]:
             print("Database already has data; skipping seed.")
             return

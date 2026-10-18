@@ -6,12 +6,15 @@ import tempfile
 os.environ.setdefault("DISASTERLENS_DATA", tempfile.mkdtemp())
 os.environ["GDACS_SYNC_MINUTES"] = "0"
 os.environ["OPENROUTER_API_KEY"] = ""
-os.environ.setdefault("RESPONDER_KEY", "test-key")
+os.environ.setdefault("ADMIN_EMAIL", "admin@test.local")
+os.environ.setdefault("ADMIN_PASSWORD", "test-password")
 
 from fastapi.testclient import TestClient  # noqa: E402
 
 from app import db, gdacs, seed  # noqa: E402
-from app.main import RESPONDER_KEY, app  # noqa: E402
+from app.main import app  # noqa: E402
+
+LOGIN = {"email": os.environ["ADMIN_EMAIL"], "password": os.environ["ADMIN_PASSWORD"]}
 
 CYCLONE = {
     "type": "Feature", "geometry": {"type": "Point", "coordinates": [146.1, 12.6]},
@@ -56,7 +59,7 @@ def test_public_proposal_review_flow():
                             follow_redirects=False)
         assert filed.status_code == 303
 
-        client.post("/responder/login", data={"key": RESPONDER_KEY})
+        client.post("/responder/login", data=LOGIN)
         review = client.get("/responder/zones").text
         assert "Melamchi Landslide" in review and "village buried" in review and "1 missing report" in review
 

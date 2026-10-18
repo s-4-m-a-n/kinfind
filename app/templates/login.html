@@ -3,9 +3,11 @@
 {% block content %}
 <form method="post" action="/responder/login" class="stack narrow">
   <h1>Responder sign in</h1>
-  <p class="hint">For rescue teams, hospitals and authorities logging found people.</p>
+  <p class="hint">For rescue teams, hospitals and authorities logging found people. Your admin gives you an account.</p>
   {% if error %}<p class="error">{{ error }}</p>{% endif %}
-  <label>Access key <input type="password" name="key" required autofocus></label>
+  <label>Email <input type="email" name="email" value="{{ email }}" autocomplete="username" required {% if not email %}autofocus{% endif %}></label>
+  <label>Password <input type="password" name="password" autocomplete="current-password" required {% if email %}autofocus{% endif %}></label>
   <button>Sign in</button>
+  <p class="hint">Forgotten your password? Ask an admin in your team to reset it.</p>
 </form>
 {% endblock %}

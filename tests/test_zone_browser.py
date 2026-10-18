@@ -7,7 +7,8 @@ import time
 os.environ.setdefault("DISASTERLENS_DATA", tempfile.mkdtemp())
 os.environ["GDACS_SYNC_MINUTES"] = "0"
 os.environ["OPENROUTER_API_KEY"] = ""
-os.environ.setdefault("RESPONDER_KEY", "test-key")
+os.environ.setdefault("ADMIN_EMAIL", "admin@test.local")
+os.environ.setdefault("ADMIN_PASSWORD", "test-password")
 
 from fastapi.testclient import TestClient  # noqa: E402
 

@@ -1,0 +1,12 @@
+{# Approve or reject a family's public appeal. Expects `a` with ref, full_name, appeal_photo_id. #}
+<div class="appeal-review">
+  {% if a.appeal_photo_id %}<img src="/responder/photos/{{ a.appeal_photo_id }}" alt="Photo the family wants to show publicly" loading="lazy">{% endif %}
+  <div>
+    <p class="hint">Before approving, check the report is genuine: call the family on their contact details. Reject it if
+      the person may be hiding from whoever reported them, or the photo isn't suitable to show publicly.</p>
+    <form method="post" action="/responder/appeals/{{ a.ref }}" class="actions">
+      <button name="action" value="approve" class="small">Approve: make public</button>
+      <button name="action" value="reject" class="secondary danger small">Reject</button>
+    </form>
+  </div>
+</div>

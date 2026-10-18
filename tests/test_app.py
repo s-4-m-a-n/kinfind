@@ -7,13 +7,16 @@ import tempfile
 os.environ["DISASTERLENS_DATA"] = tempfile.mkdtemp()
 os.environ["GDACS_SYNC_MINUTES"] = "0"  # never call GDACS from tests
 os.environ["OPENROUTER_API_KEY"] = ""  # ...or OpenRouter, even if .env has a key
-os.environ["RESPONDER_KEY"] = "test-key"
+os.environ["ADMIN_EMAIL"] = "admin@test.local"
+os.environ["ADMIN_PASSWORD"] = "test-password"
 
 from fastapi.testclient import TestClient  # noqa: E402
 from PIL import Image  # noqa: E402
 
 from app import seed  # noqa: E402
 from app.main import app  # noqa: E402
+
+LOGIN = {"email": os.environ["ADMIN_EMAIL"], "password": os.environ["ADMIN_PASSWORD"]}
 
 
 def _img(fmt="JPEG", color="tan") -> bytes:
@@ -52,7 +55,7 @@ def test_family_flow_hides_private_details():
         assert "Verification requested" in client.get(case_url).text
 
         assert client.get("/responder", follow_redirects=False).status_code == 303
-        client.post("/responder/login", data={"key": "test-key"})
+        client.post("/responder/login", data=LOGIN)
         dash = client.get("/responder").text
         assert "Ram Thapa" in dash and "98000000" in dash and "BP Koirala" in dash
 
@@ -77,7 +80,7 @@ def test_feature_photos_are_linked_and_responder_only():
         assert "/responder/photos" not in page
 
         ref = re.search(r"/case/(MP-\w+)", case_url).group(1)
-        client.post("/responder/login", data={"key": "test-key"})
+        client.post("/responder/login", data=LOGIN)
         record = client.get(f"/responder/missing/{ref}").text
         # A family's photos are of a living person: shown as they are, never filtered.
         assert 'alt="Photo of scar"' in record and 'alt="Photo of other"' in record
@@ -135,7 +138,7 @@ def test_disaster_zones_on_home_map():
         assert client.post("/responder/disasters", data=zone, follow_redirects=False).status_code == 303
         assert "Test Quake" not in client.get("/").text  # not signed in: rejected
 
-        client.post("/responder/login", data={"key": "test-key"})
+        client.post("/responder/login", data=LOGIN)
         assert client.post("/responder/disasters", data={**zone, "lat": "95"}).status_code == 400
         assert client.post("/responder/disasters", data=zone, follow_redirects=False).status_code == 303
         home = client.get("/").text

@@ -6,7 +6,8 @@ import tempfile
 os.environ.setdefault("DISASTERLENS_DATA", tempfile.mkdtemp())
 os.environ["GDACS_SYNC_MINUTES"] = "0"
 os.environ["OPENROUTER_API_KEY"] = ""
-os.environ.setdefault("RESPONDER_KEY", "test-key")
+os.environ.setdefault("ADMIN_EMAIL", "admin@test.local")
+os.environ.setdefault("ADMIN_PASSWORD", "test-password")
 
 from fastapi.testclient import TestClient  # noqa: E402
 from PIL import Image  # noqa: E402
@@ -38,9 +39,11 @@ def test_every_form_has_a_rule():
 
 def test_login_guessing_is_limited():
     with TestClient(app) as client:
-        codes = [client.post("/responder/login", data={"key": f"guess-{i}"}).status_code for i in range(11)]
-        assert codes[:10] == [200] * 10  # wrong key: the form again
-        last = client.post("/responder/login", data={"key": "guess"})
+        # A different email each time, so this tests the per-connection limit, not the per-email lockout.
+        codes = [client.post("/responder/login", data={"email": f"guess-{i}@example.org", "password": "x"}).status_code
+                 for i in range(11)]
+        assert codes[:10] == [401] * 10  # wrong password: the form again
+        last = client.post("/responder/login", data={"email": "guess@example.org", "password": "x"})
         assert last.status_code == 429 and int(last.headers["retry-after"]) > 0
         assert "Too many requests" in last.text
 

@@ -7,21 +7,24 @@ verification and a responder contacts them.
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import hmac
 import io
 import logging
 import os
 import re
 import secrets
+import sqlite3
 import time
 from contextlib import asynccontextmanager
+from datetime import date, timedelta
 from pathlib import Path
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from markupsafe import Markup, escape
+from starlette.datastructures import MutableHeaders
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 
@@ -38,12 +41,11 @@ def load_env_file(path: Path) -> None:
 
 load_env_file(Path(__file__).resolve().parent.parent / ".env")  # before anything reads os.environ
 
-from . import ai_match, db, gdacs, illustrate, limits, safe, sketch  # noqa: E402
+from . import accounts, ai_match, db, gdacs, illustrate, limits, photos, safe, sketch  # noqa: E402
 from .matching import BODY_LOCATIONS, FEATURE_KINDS, HAIR_COLORS, rank_found, rank_missing  # noqa: E402
 
 APP_DIR = Path(__file__).resolve().parent
 APP_NAME = "Kinfind"
-RESPONDER_KEY = os.environ.get("RESPONDER_KEY", "responder-demo")
 MAX_PHOTO_BYTES = limits.MAX_PHOTO_BYTES
 PHOTO_TYPES = {"image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp"}
 REF_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"  # no 0/O, 1/I/L
@@ -66,6 +68,7 @@ async def gdacs_loop():
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     db.init()
+    accounts.bootstrap_admin()
     task = asyncio.create_task(gdacs_loop()) if GDACS_SYNC_MINUTES > 0 else None
     yield
     if task:
@@ -101,6 +104,17 @@ def illustration_ready(pid: int) -> bool:
 
 templates.env.tests["illustration_ready"] = illustration_ready  # {{ ids|reject('illustration_ready') }}
 templates.env.filters["illustration_failure"] = illustrate.failure
+_REF = re.compile(r"\b(MP|FD)-[A-Z0-9]{6}\b")
+
+
+def ref_links(text) -> Markup:
+    """Escape text and link every case ref in it, e.g. 'MP-AB12CD ↔ FD-XY34ZW'."""
+    def link(m):
+        return f'<a href="/responder/{"missing" if m.group(1) == "MP" else "found"}/{m.group(0)}">{m.group(0)}</a>'
+    return Markup(_REF.sub(link, str(escape(text or ""))))
+
+
+templates.env.filters["ref_links"] = ref_links
 
 
 async def _reject(scope, receive, send, status: int, message: str, headers: dict) -> None:
@@ -113,8 +127,80 @@ async def _reject(scope, receive, send, status: int, message: str, headers: dict
 app.add_middleware(limits.RequestLimits, reject=_reject)
 
 
+def is_https(scope) -> bool:
+    """True when the visitor uses HTTPS, including behind a proxy that ends HTTPS (Cloud Run)."""
+    proto = dict(scope.get("headers") or []).get(b"x-forwarded-proto", b"").decode("latin-1")
+    return scope.get("scheme") == "https" or proto.split(",")[0].strip() == "https"
+
+
+# Map tiles and Leaflet are the only things loaded from elsewhere. Inline scripts and styles are
+# still used by the templates, hence 'unsafe-inline'.
+CSP = "; ".join([
+    "default-src 'self'", "script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com",
+    "style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com",
+    "img-src 'self' data: blob: https://tile.openstreetmap.org https://cdnjs.cloudflare.com",
+    "connect-src 'self'", "object-src 'none'", "base-uri 'self'", "form-action 'self'", "frame-ancestors 'none'"])
+SECURITY_HEADERS = {
+    "Content-Security-Policy": CSP,
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    # Private links carry their key in the URL: other sites only ever get our origin, never the path
+    # or query. (No Referer at all would break the map: OpenStreetMap's tile servers require one.)
+    "Referrer-Policy": "strict-origin-when-cross-origin",
+    "Permissions-Policy": "camera=(), microphone=(), geolocation=(self)",
+}
+PRIVATE_PATHS = ("/responder", "/case/", "/safe/c/")  # pages with contacts or private keys: never cache
+
+
+class SecurityHeaders:
+    """ASGI middleware adding the headers above to every response."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            return await self.app(scope, receive, send)
+
+        async def send_with_headers(message):
+            if message["type"] == "http.response.start":
+                headers = MutableHeaders(scope=message)
+                for name, value in SECURITY_HEADERS.items():
+                    headers.setdefault(name, value)
+                if is_https(scope):
+                    headers.setdefault("Strict-Transport-Security", "max-age=31536000")
+                if scope["path"].startswith(PRIVATE_PATHS):
+                    headers.setdefault("Cache-Control", "no-store")
+            await send(message)
+
+        await self.app(scope, receive, send_with_headers)
+
+
+app.add_middleware(SecurityHeaders)  # added last, so it also covers rate-limit and size-limit errors
+
+
+class HideSecretsInLogs(logging.Filter):
+    """Keep private-link keys out of the access log: anyone reading the log could open the case."""
+    PATTERNS = [(re.compile(r"([?&]k=)[^&\s]+"), r"\1[hidden]"), (re.compile(r"(/safe/c/)[^/?\s]+"), r"\1[hidden]")]
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if isinstance(record.args, tuple):
+            record.args = tuple(self.clean(a) if isinstance(a, str) else a for a in record.args)
+        return True
+
+    @classmethod
+    def clean(cls, text: str) -> str:
+        for pattern, replacement in cls.PATTERNS:
+            text = pattern.sub(replacement, text)
+        return text
+
+
+logging.getLogger("uvicorn.access").addFilter(HideSecretsInLogs())
+
+
 def render(request: Request, name: str, status_code: int = 200, **ctx):
-    ctx["is_responder"] = is_responder(request)
+    ctx["user"] = current_user(request)
+    ctx["is_responder"] = ctx["user"] is not None
     ctx["photo_view"] = photo_view(request)
     return templates.TemplateResponse(request, name, ctx, status_code=status_code)
 
@@ -154,6 +240,18 @@ def _float(value, lo: float, hi: float) -> float | None:
 def _text(value, limit: int = 2000) -> str | None:
     value = (value or "").strip()
     return value[:limit] or None
+
+
+def _date(value) -> str | None:
+    """A real YYYY-MM-DD date that isn't in the future (a day's slack for time zones), else None.
+
+    Matching compares these as text, so a malformed date would silently hide every match.
+    """
+    try:
+        d = date.fromisoformat(str(value or "").strip())
+    except ValueError:
+        return None
+    return d.isoformat() if d <= date.today() + timedelta(days=1) else None
 
 
 def _choice(value, options) -> str | None:
@@ -198,11 +296,10 @@ async def save_upload(upload) -> str:
     data = await upload.read(MAX_PHOTO_BYTES + 1)
     if len(data) > MAX_PHOTO_BYTES:
         raise HTTPException(400, "Each photo must be under 8 MB.")
-    try:  # reject files that only claim to be images: they would break sketches and AI checks
-        from PIL import Image
-        Image.open(io.BytesIO(data)).verify()
-    except Exception:
-        raise HTTPException(400, f"“{upload.filename}” could not be read as an image.")
+    try:  # strips GPS and other metadata; rejects non-images and decompression bombs
+        data = photos.clean(data, ext)
+    except photos.BadImage as exc:
+        raise HTTPException(400, f"“{upload.filename}” {exc}.")
     filename = secrets.token_hex(16) + ext
     (db.UPLOAD_DIR / filename).write_bytes(data)
     return filename
@@ -268,39 +365,184 @@ def photo_count(conn, owner_type: str, owner_id: int) -> int:
 
 # --- responder auth ----------------------------------------------------------
 
-def _session_token() -> str:
-    return hashlib.sha256(("disasterlens:" + RESPONDER_KEY).encode()).hexdigest()
+def current_user(request: Request):
+    """The signed-in responder's account row, or None. Looked up once per request."""
+    if not hasattr(request.state, "user"):
+        with db.session() as conn:
+            request.state.user = accounts.from_session(conn, request.cookies.get("responder"))
+    return request.state.user
 
 
 def is_responder(request: Request) -> bool:
-    return hmac.compare_digest(request.cookies.get("responder", ""), _session_token())
+    return current_user(request) is not None
 
 
-def require_responder(request: Request) -> None:
-    if not is_responder(request):
+def require_responder(request: Request):
+    user = current_user(request)
+    if not user:
         raise HTTPException(303, headers={"Location": "/responder/login"})
+    if user["must_change_password"] and request.url.path != "/responder/password":
+        raise HTTPException(303, headers={"Location": "/responder/password"})
+    return user
+
+
+def require_admin(request: Request):
+    user = require_responder(request)
+    if user["role"] != "admin":
+        raise HTTPException(403, "Only admins can manage the team.")
+    return user
 
 
 @app.get("/responder/login")
 def login_form(request: Request):
-    return render(request, "login.html", error=None)
+    return render(request, "login.html", error=None, email="")
 
 
 @app.post("/responder/login")
 async def login(request: Request):
     form = await request.form()
-    if not hmac.compare_digest(str(form.get("key", "")), RESPONDER_KEY):
-        return render(request, "login.html", error="That access key is not valid.")
-    resp = RedirectResponse("/responder", status_code=303)
-    resp.set_cookie("responder", _session_token(), httponly=True, samesite="strict")
+    email, password = str(form.get("email", "")).strip().lower()[:200], str(form.get("password", ""))
+    ip = limits.client_ip(request.scope)
+    with db.session() as conn:
+        if accounts.locked_out(conn, email, ip):
+            accounts.log(conn, None, "blocked sign-in", email, ip)  # not counted, so the lock-out still ends
+            blocked = True
+        else:
+            blocked = False
+            user = accounts.authenticate(conn, email, password)
+            accounts.log(conn, user, "signed in" if user else "failed sign-in", None if user else email, ip)
+            token = accounts.start_session(conn, user["id"]) if user else None
+    if blocked:
+        return render(request, "login.html", status_code=429, email=email,
+                      error=f"Too many failed attempts for this email. Wait {accounts.LOCKOUT_MINUTES} minutes "
+                            "and try again.")
+    if not user:
+        return render(request, "login.html", status_code=401, email=email,
+                      error="That email and password don't match an active account.")
+    resp = RedirectResponse("/responder/password" if user["must_change_password"] else "/responder",
+                            status_code=303)
+    resp.set_cookie("responder", token, httponly=True, samesite="strict", secure=is_https(request.scope),
+                    max_age=accounts.SESSION_HOURS * 3600)
     return resp
 
 
 @app.post("/responder/logout")
-def logout():
+def logout(request: Request):
+    user = current_user(request)
+    with db.session() as conn:
+        if user:
+            accounts.log(conn, user, "signed out")
+        accounts.end_session(conn, request.cookies.get("responder"))
     resp = RedirectResponse("/", status_code=303)
     resp.delete_cookie("responder")
     return resp
+
+
+@app.get("/responder/password")
+def password_form(request: Request):
+    user = require_responder(request)
+    return render(request, "password.html", first=bool(user["must_change_password"]), error=None)
+
+
+@app.post("/responder/password")
+async def change_password(request: Request):
+    user = require_responder(request)
+    form = await request.form()
+    new = str(form.get("new_password", ""))
+    error = None
+    if not accounts.check_password(str(form.get("current_password", "")), user["password_hash"]):
+        error = "Your current password is not right."
+    elif len(new) < accounts.MIN_PASSWORD:
+        error = f"Choose a password of at least {accounts.MIN_PASSWORD} characters."
+    elif new != form.get("confirm_password"):
+        error = "The two new passwords don't match."
+    elif hmac.compare_digest(new, str(form.get("current_password", ""))):
+        error = "Choose a password different from the current one."
+    if error:
+        return render(request, "password.html", status_code=400, first=bool(user["must_change_password"]),
+                      error=error)
+    with db.session() as conn:
+        accounts.set_password(conn, user["id"], new)
+        accounts.end_all_sessions(conn, user["id"], keep=request.cookies.get("responder"))
+        accounts.log(conn, user, "changed password")
+    return RedirectResponse("/responder", status_code=303)
+
+
+# --- team (admins) -----------------------------------------------------------
+
+def _team_page(request: Request, status_code: int = 200, **ctx):
+    with db.session() as conn:
+        team = conn.execute("""SELECT * FROM responders
+                               ORDER BY active DESC, role = 'admin' DESC, name COLLATE NOCASE""").fetchall()
+    ctx.setdefault("error", None)
+    ctx.setdefault("issued", None)
+    return render(request, "team.html", status_code=status_code, team=team, roles=accounts.ROLES, **ctx)
+
+
+@app.get("/responder/team")
+def team(request: Request):
+    require_admin(request)
+    return _team_page(request)
+
+
+@app.post("/responder/team")
+async def add_member(request: Request):
+    admin = require_admin(request)
+    form = await request.form()
+    name, email = _text(form.get("name"), 200), _text(form.get("email"), 200)
+    role = _choice(form.get("role"), accounts.ROLES) or "responder"
+    if not (name and email and "@" in email):
+        return _team_page(request, 400, error="Give a name and a valid email address.")
+    try:
+        with db.session() as conn:
+            _, password = accounts.create(conn, name, email, role, _text(form.get("organisation"), 200))
+            accounts.log(conn, admin, f"added {role}", email.lower())
+    except sqlite3.IntegrityError:
+        return _team_page(request, 400, error=f"{email} already has an account.")
+    # Shown once, on this page only: it's never put in a URL or stored in clear.
+    return _team_page(request, issued={"name": name, "email": email.lower(), "password": password, "new": True})
+
+
+@app.post("/responder/team/{rid}")
+async def update_member(request: Request, rid: int):
+    admin = require_admin(request)
+    action = _choice((await request.form()).get("action"),
+                     ("deactivate", "activate", "reset", "make-admin", "make-responder"))
+    if not action:
+        raise HTTPException(400)
+    if rid == admin["id"]:  # so there is always at least one active admin
+        return _team_page(request, 400, error="You can't change your own account here. "
+                                              "Use Change password, or ask another admin.")
+    issued = None
+    with db.session() as conn:
+        member = conn.execute("SELECT * FROM responders WHERE id=?", (rid,)).fetchone()
+        if not member:
+            raise HTTPException(404)
+        if action in ("deactivate", "activate"):
+            conn.execute("UPDATE responders SET active=? WHERE id=?", (int(action == "activate"), rid))
+            if action == "deactivate":
+                accounts.end_all_sessions(conn, rid)
+        elif action == "reset":
+            password = accounts.temp_password()
+            accounts.set_password(conn, rid, password, must_change=True)
+            accounts.end_all_sessions(conn, rid)
+            issued = {"name": member["name"], "email": member["email"], "password": password, "new": False}
+        else:
+            conn.execute("UPDATE responders SET role=? WHERE id=?", (action.removeprefix("make-"), rid))
+        accounts.log(conn, admin, {"deactivate": "deactivated account", "activate": "reactivated account",
+                                   "reset": "reset password", "make-admin": "made admin",
+                                   "make-responder": "made responder"}[action], member["email"])
+    if issued:
+        return _team_page(request, issued=issued)
+    return RedirectResponse("/responder/team", status_code=303)
+
+
+@app.get("/responder/activity")
+def activity(request: Request):
+    require_admin(request)
+    with db.session() as conn:
+        entries = accounts.recent_activity(conn)
+    return render(request, "activity.html", entries=entries)
 
 
 # --- families ----------------------------------------------------------------
@@ -390,7 +632,7 @@ async def create_missing(request: Request, background: BackgroundTasks):
              _choice(form.get("sex"), ("male", "female", "unknown")),
              _int(form.get("age"), 0, 120), _int(form.get("height_cm"), 40, 250),
              _choice(form.get("hair_color"), HAIR_COLORS),
-             _text(form.get("last_seen_place"), 300), _text(form.get("last_seen_date"), 10),
+             _text(form.get("last_seen_place"), 300), _date(form.get("last_seen_date")),
              _text(form.get("clothing")), _text(form.get("description")),
              reporter_name, reporter_contact, _text(form.get("person_phone"), 40)))
         await save_features(conn, parse_features(form), "missing", cur.lastrowid)
@@ -442,6 +684,7 @@ def case(request: Request, ref: str, k: str = "", new: int = 0):
         return render(request, "case.html", case=profile, matches=matches, k=k, new=new,
                       disaster=disaster, photos=len(own_photos), own_photos=own_photos,
                       appeal_public=bool(row["appeal_public"]), appeal_photo_id=row["appeal_photo_id"],
+                      appeal_review=row["appeal_review"],
                       safe_checkins=safe.find(conn, row["full_name"], row["person_phone"]) if row["person_phone"] else [],
                       tips=tips_for(conn, row["id"], include_hidden=False))
 
@@ -478,7 +721,8 @@ templates.env.globals["tip_conditions"] = TIP_CONDITIONS
 
 
 def _load_appeal(conn, ref: str):
-    row = conn.execute("SELECT * FROM missing_reports WHERE ref=? AND appeal_public=1", (ref,)).fetchone()
+    row = conn.execute("SELECT * FROM missing_reports WHERE ref=? AND appeal_public=1 AND appeal_review='approved'",
+                       (ref,)).fetchone()
     if not row:
         raise HTTPException(404, "This appeal isn't available. The family may have taken it down.")
     return row
@@ -499,7 +743,7 @@ def public_appeals(conn, disaster: int = 0, limit: int = 60) -> list[dict]:
     rows = conn.execute("""SELECT m.ref, m.full_name, m.sex, m.age, m.last_seen_place, m.last_seen_date,
                                   m.appeal_photo_id, d.name AS disaster
                            FROM missing_reports m JOIN disasters d ON d.id = m.disaster_id
-                           WHERE m.appeal_public = 1 AND (? = 0 OR m.disaster_id = ?)
+                           WHERE m.appeal_public = 1 AND m.appeal_review = 'approved' AND (? = 0 OR m.disaster_id = ?)
                            ORDER BY m.id DESC LIMIT ?""", (disaster, disaster, limit))
     return [dict(r) for r in rows]
 
@@ -515,8 +759,11 @@ async def update_appeal(request: Request, ref: str):
         if photo_id and not conn.execute("SELECT 1 FROM photos WHERE id=? AND owner_type='missing' AND owner_id=?",
                                           (photo_id, row["id"])).fetchone():
             photo_id = None  # only one of this report's own photos can be made public
-        conn.execute("UPDATE missing_reports SET appeal_public=?, appeal_photo_id=? WHERE id=?",
-                     (1 if publish else 0, photo_id if publish else None, row["id"]))
+        review = row["appeal_review"]
+        if publish and (review != "approved" or photo_id != row["appeal_photo_id"]):
+            review = "pending"  # a responder checks every new appeal and every new public photo
+        conn.execute("UPDATE missing_reports SET appeal_public=?, appeal_photo_id=?, appeal_review=? WHERE id=?",
+                     (1 if publish else 0, photo_id if publish else None, review, row["id"]))
     return RedirectResponse(f"/case/{ref}?k={k}#appeal", status_code=303)
 
 
@@ -730,19 +977,45 @@ def dashboard(request: Request):
                    (SELECT COUNT(*) FROM tip_photos p WHERE p.tip_id = t.id) AS photos
             FROM tips t JOIN missing_reports m ON m.id = t.missing_id
             WHERE t.status = 'unverified' ORDER BY t.id DESC LIMIT 10""").fetchall()
+        pending_appeals = conn.execute("""
+            SELECT m.ref, m.full_name, m.appeal_photo_id, m.reporter_name, m.reporter_contact, d.name AS disaster
+            FROM missing_reports m JOIN disasters d ON d.id = m.disaster_id
+            WHERE m.appeal_public = 1 AND m.appeal_review = 'pending' ORDER BY m.id""").fetchall()
         return render(request, "dashboard.html", queue=queue, found=found, missing=missing,
                       pending_zones=pending_zones, ai_flags=ai_flags, ai_enabled=ai_match.enabled(),
-                      new_tips=new_tips, safe_count=safe_count)
+                      new_tips=new_tips, safe_count=safe_count, pending_appeals=pending_appeals)
+
+
+@app.post("/responder/appeals/{ref}")
+async def review_appeal(request: Request, ref: str):
+    user = require_responder(request)
+    action = _choice((await request.form()).get("action"), ("approve", "reject"))
+    if not action:
+        raise HTTPException(400)
+    with db.session() as conn:
+        updated = conn.execute("""UPDATE missing_reports SET appeal_review=?
+                                  WHERE ref=? AND appeal_public=1 AND appeal_review='pending'""",
+                               ("approved" if action == "approve" else "rejected", ref)).rowcount
+        if not updated:
+            raise HTTPException(404, "That appeal is no longer awaiting approval.")
+        accounts.log(conn, user, "approved appeal" if action == "approve" else "rejected appeal", ref)
+    return RedirectResponse("/responder#appeals", status_code=303)
 
 
 @app.post("/responder/verifications/{vid}")
 async def update_verification(request: Request, vid: int):
-    require_responder(request)
+    user = require_responder(request)
     status = _choice((await request.form()).get("status"), ("open", "contacted", "confirmed", "rejected"))
     if not status:
         raise HTTPException(400)
     with db.session() as conn:
+        pair = conn.execute("""SELECT m.ref AS missing_ref, f.ref AS found_ref FROM verification_requests v
+                               JOIN missing_reports m ON m.id = v.missing_id JOIN found_records f ON f.id = v.found_id
+                               WHERE v.id=?""", (vid,)).fetchone()
+        if not pair:
+            raise HTTPException(404)
         conn.execute("UPDATE verification_requests SET status=? WHERE id=?", (status, vid))
+        accounts.log(conn, user, f"marked match {status}", f"{pair['missing_ref']} ↔ {pair['found_ref']}")
     return RedirectResponse("/responder", status_code=303)
 
 
@@ -761,10 +1034,11 @@ def disaster_form(request: Request):
 
 @app.post("/responder/disasters")
 async def create_disaster(request: Request):
-    require_responder(request)
+    user = require_responder(request)
     zone = parse_zone(await request.form())
     with db.session() as conn:
         insert_zone(conn, zone, "active", "responder")
+        accounts.log(conn, user, "added zone", zone["name"])
     return RedirectResponse("/#zones", status_code=303)
 
 
@@ -794,7 +1068,7 @@ async def zone_sync(request: Request):
 
 @app.post("/responder/zones/{zid}")
 async def zone_decide(request: Request, zid: int):
-    require_responder(request)
+    user = require_responder(request)
     form = await request.form()
     action = _choice(form.get("action"), ("approve", "reject", "merge"))
     with db.session() as conn:
@@ -818,12 +1092,14 @@ async def zone_decide(request: Request, zid: int):
             if conn.execute("SELECT 1 FROM missing_reports WHERE disaster_id=?", (zid,)).fetchone():
                 raise HTTPException(400, "Families have already reported into this zone. Merge it into an active zone instead.")
             conn.execute("UPDATE disasters SET status='rejected' WHERE id=?", (zid,))
+        accounts.log(conn, user, {"approve": "approved zone", "reject": "rejected zone",
+                                  "merge": "merged zone"}[action], zone["name"])
     return RedirectResponse("/responder/zones", status_code=303)
 
 
 @app.post("/responder/found")
 async def create_found(request: Request, background: BackgroundTasks):
-    require_responder(request)
+    user = require_responder(request)
     form = await request.form()
     found_place = _text(form.get("found_place"), 300)
     status = _choice(form.get("status"), ("alive", "deceased"))
@@ -840,13 +1116,14 @@ async def create_found(request: Request, background: BackgroundTasks):
             """INSERT INTO found_records (ref, disaster_id, status, found_place, found_date, facility,
                    sex, age_min, age_max, height_cm, hair_color, clothing, description)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (ref, disaster_id(conn, form), status, found_place, _text(form.get("found_date"), 10),
+            (ref, disaster_id(conn, form), status, found_place, _date(form.get("found_date")),
              _text(form.get("facility"), 300),
              _choice(form.get("sex"), ("male", "female", "unknown")), age_min, age_max,
              _int(form.get("height_cm"), 40, 250), _choice(form.get("hair_color"), HAIR_COLORS),
              _text(form.get("clothing")), _text(form.get("description"))))
         await save_features(conn, parse_features(form), "found", cur.lastrowid)
         await save_photos(conn, form, "found", cur.lastrowid)
+        accounts.log(conn, user, f"logged found person ({status})", ref)
     background.add_task(ai_match.run_for, "found", cur.lastrowid)  # no-op without an API key
     if status == "deceased":
         background.add_task(_illustrate_record, cur.lastrowid)
@@ -874,11 +1151,12 @@ def _photo_ids(conn, owner_type: str, owner_id: int) -> tuple[dict[int, list[int
 
 @app.get("/responder/found/{ref}")
 def found_detail(request: Request, ref: str):
-    require_responder(request)
+    user = require_responder(request)
     with db.session() as conn:
         row = conn.execute("SELECT * FROM found_records WHERE ref=?", (ref,)).fetchone()
         if not row:
             raise HTTPException(404)
+        accounts.log(conn, user, "opened found record", ref)  # lists matching families' contact details
         profile = db.found_profile(conn, row)
         matches = rank_missing(profile, db.missing_profiles(conn, row["disaster_id"]))
         feature_photos, photo_ids = _photo_ids(conn, "found", row["id"])
@@ -891,11 +1169,12 @@ def found_detail(request: Request, ref: str):
 
 @app.get("/responder/missing/{ref}")
 def missing_detail(request: Request, ref: str):
-    require_responder(request)
+    user = require_responder(request)
     with db.session() as conn:
         row = conn.execute("SELECT * FROM missing_reports WHERE ref=?", (ref,)).fetchone()
         if not row:
             raise HTTPException(404)
+        accounts.log(conn, user, "opened missing report", ref)  # the page shows the family's contact details
         profile = db.missing_profile(conn, row)
         matches = rank_found(profile, db.found_profiles(conn, row["disaster_id"]))
         feature_photos, photo_ids = _photo_ids(conn, "missing", row["id"])
@@ -951,8 +1230,9 @@ def _rerun(kind: str, record_id: int) -> None:
 
 @app.get("/responder/safe")
 def responder_checkins(request: Request, disaster: int = 0, q: str = ""):
-    require_responder(request)
+    user = require_responder(request)
     with db.session() as conn:
+        accounts.log(conn, user, "opened safe check-ins", f"search: {q[:100]}" if q else None)  # lists phone numbers
         rows = conn.execute("""
             SELECT c.*, d.name AS disaster,
                    (SELECT group_concat(full_name || COALESCE(' (' || phone || ')', ''), ', ')
@@ -970,15 +1250,16 @@ def responder_checkins(request: Request, disaster: int = 0, q: str = ""):
 
 @app.post("/responder/safe/{cid}/remove")
 def remove_checkin(request: Request, cid: int):
-    require_responder(request)
+    user = require_responder(request)
     with db.session() as conn:
         conn.execute("UPDATE checkins SET status='removed', updated_at=datetime('now') WHERE id=?", (cid,))
+        accounts.log(conn, user, "removed safe check-in", f"check-in #{cid}")
     return RedirectResponse("/responder/safe", status_code=303)
 
 
 @app.post("/responder/tips/{tid}")
 async def moderate_tip(request: Request, tid: int):
-    require_responder(request)
+    user = require_responder(request)
     action = _choice((await request.form()).get("action"), ("verify", "hide", "unhide"))
     status = {"verify": "verified", "hide": "hidden", "unhide": "unverified"}.get(action)
     if not status:
@@ -990,6 +1271,8 @@ async def moderate_tip(request: Request, tid: int):
             raise HTTPException(404)
         conn.execute("UPDATE tips SET status=?, hidden_by=? WHERE id=?",
                      (status, "responder" if status == "hidden" else None, tid))
+        accounts.log(conn, user, {"verify": "verified tip", "hide": "hid tip", "unhide": "unhid tip"}[action],
+                     f"tip #{tid} on {tip['ref']}")
     return RedirectResponse(f"/responder/missing/{tip['ref']}#tips", status_code=303)
 
 
@@ -1005,7 +1288,7 @@ def responder_tip_photo(request: Request, tpid: int):
 
 @app.get("/responder/photos/{pid}")
 def photo(request: Request, pid: int, view: str = "", confirm: int = 0):
-    require_responder(request)
+    user = require_responder(request)
     with db.session() as conn:
         row = conn.execute("SELECT filename FROM photos WHERE id=?", (pid,)).fetchone()
         if not row:
@@ -1020,6 +1303,8 @@ def photo(request: Request, pid: int, view: str = "", confirm: int = 0):
     if view == "original":
         if not confirm:  # e.g. a copied link: warn before showing it
             return render(request, "graphic_warning.html", pid=pid, next=None)
+        with db.session() as conn:
+            accounts.log(conn, user, "viewed unfiltered photo", f"photo #{pid}")
         return FileResponse(original, headers=headers)
     if view == "illustration" and illustrate.enabled():
         if illustrate.ready(row["filename"]):
@@ -1033,7 +1318,7 @@ def photo(request: Request, pid: int, view: str = "", confirm: int = 0):
 
 @app.post("/responder/photo-view")
 async def set_photo_view(request: Request):
-    require_responder(request)
+    user = require_responder(request)
     form = await request.form()
     view = _choice(form.get("view"), ("illustration", "sketch", "original")) or "sketch"
     back = str(form.get("next") or "/responder")
@@ -1041,6 +1326,10 @@ async def set_photo_view(request: Request):
         back = "/responder"  # only ever redirect within the responder area
     if view == "original" and form.get("confirm") != "1":
         return render(request, "graphic_warning.html", pid=None, next=back)
+    if view == "original":
+        with db.session() as conn:
+            accounts.log(conn, user, "turned on unfiltered photos")
     resp = RedirectResponse(back, status_code=303)
-    resp.set_cookie("photo_view", view, httponly=True, samesite="strict", max_age=365 * 24 * 3600)
+    resp.set_cookie("photo_view", view, httponly=True, samesite="strict", secure=is_https(request.scope),
+                    max_age=365 * 24 * 3600)
     return resp

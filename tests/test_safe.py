@@ -6,12 +6,15 @@ import tempfile
 os.environ.setdefault("DISASTERLENS_DATA", tempfile.mkdtemp())
 os.environ["GDACS_SYNC_MINUTES"] = "0"
 os.environ["OPENROUTER_API_KEY"] = ""
-os.environ.setdefault("RESPONDER_KEY", "test-key")
+os.environ.setdefault("ADMIN_EMAIL", "admin@test.local")
+os.environ.setdefault("ADMIN_PASSWORD", "test-password")
 
 from fastapi.testclient import TestClient  # noqa: E402
 
 from app import limits, safe, seed  # noqa: E402
-from app.main import RESPONDER_KEY, app  # noqa: E402
+from app.main import app  # noqa: E402
+
+LOGIN = {"email": os.environ["ADMIN_EMAIL"], "password": os.environ["ADMIN_PASSWORD"]}
 
 
 def test_name_and_phone_matching():
@@ -76,7 +79,7 @@ def test_check_in_and_find():
         assert "marked themselves safe" not in client.get(resp.headers["location"]).text  # no number given
 
         # Responders see similar names on missing records, and can remove fake check-ins.
-        client.post("/responder/login", data={"key": RESPONDER_KEY})
+        client.post("/responder/login", data=LOGIN)
         ref = re.search(r"/case/(MP-\w+)", resp.headers["location"]).group(1)
         record = client.get(f"/responder/missing/{ref}").text
         assert "Safe check-ins with a similar name" in record and "9805550001" in record.replace("-", "").replace(" ", "")
