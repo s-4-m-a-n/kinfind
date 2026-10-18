@@ -15,7 +15,8 @@
   const color = css.getPropertyValue("--zone").trim() || "#d9480f";
   const muted = css.getPropertyValue("--muted").trim();
 
-  // --- load zones ----------------------------------------------------------------
+  // --- load zones (and the map tile URLs, in parallel) -------------------------------
+  const tileInfo = fetch("/map/tiles.json").then((r) => r.json()).catch(() => ({ unavailable: true }));
   const inline = document.getElementById("zone-data");
   let zones = inline ? JSON.parse(inline.textContent) : [];
   if (el.dataset.src) {
@@ -35,13 +36,43 @@
   // Whole-number zoom levels: half-steps leave hairline gaps between map tiles in Chrome.
   const map = L.map(el, { worldCopyJump: true, minZoom: 1, zoomSnap: 1, scrollWheelZoom: false, preferCanvas: true });
   map.fitBounds([[-45, -150], [65, 160]]);  // the whole inhabited world
-  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
-    maxZoom: 18,
-    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-  }).addTo(map);
+  baseMap(await tileInfo);
   // Scroll-zoom only once the map is in use, so the page still scrolls past it.
   map.on("focus click", () => map.scrollWheelZoom.enable());
   map.on("blur", () => map.scrollWheelZoom.disable());
+
+  // Google Maps tiles (Map Tiles API). Google's terms: show "Google Maps" and the data copyright
+  // for the area in view, and don't alter the tiles. Without a Maps key: OpenStreetMap (development).
+  function baseMap(info) {
+    if (info.tiles) {
+      el.classList.add("google-tiles");
+      L.tileLayer(info.tiles, { maxZoom: 18, attribution: "Google Maps" }).addTo(map);
+      let shown = "", timer;
+      const credit = async () => {
+        const b = map.getBounds(), wide = b.getEast() - b.getWest() >= 360;
+        const clampLat = (v) => Math.max(-89.9, Math.min(89.9, v));
+        const wrap = (v) => L.Util.wrapNum(v, [-180, 180], true);
+        const q = new URLSearchParams({
+          zoom: map.getZoom(), north: clampLat(b.getNorth()), south: clampLat(b.getSouth()),
+          east: wide ? 179.99 : wrap(b.getEast()), west: wide ? -179.99 : wrap(b.getWest()),
+        });
+        try {
+          const { copyright } = await (await fetch(`${info.viewport}&${q}`)).json();
+          if (copyright && copyright !== shown) {
+            map.attributionControl.removeAttribution(shown).addAttribution(copyright);
+            shown = copyright;
+          }
+        } catch (e) { /* keep the last copyright line */ }
+      };
+      map.on("moveend", () => { clearTimeout(timer); timer = setTimeout(credit, 400); });
+      credit();
+    } else if (!info.unavailable) {
+      L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        maxZoom: 18,
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+      }).addTo(map);
+    }
+  }
 
   function link(text, href, cls) {
     const a = document.createElement("a");

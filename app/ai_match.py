@@ -1,4 +1,4 @@
-"""AI photo check: find likely matches from distinctive-feature photos, via OpenRouter.
+"""AI photo check: find likely matches from distinctive-feature photos, with Gemini (see llm.py).
 
 Three stages, so photos are compared only where it is worth it:
 
@@ -20,13 +20,11 @@ import base64
 import io
 import json
 import os
-import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 
-from . import db
+from . import db, llm
 from .matching import is_excluded
 
-API = "https://openrouter.ai/api/v1/chat/completions"
 MODEL = os.environ.get("AI_MATCH_MODEL", "google/gemini-3-flash-preview")
 MAX_CANDIDATES = 100  # records screened per new record (one text-only call)
 SHORTLIST_MIN = 40    # screening score needed for a photo comparison
@@ -107,22 +105,17 @@ COMPARE_SCHEMA = {
 
 
 def enabled() -> bool:
-    return bool(os.environ.get("OPENROUTER_API_KEY"))
+    return llm.enabled()
 
 
 # --- talking to the model --------------------------------------------------------
 
 def call_model(messages: list[dict], name: str, schema: dict, timeout: float = 120) -> dict:
     """One chat call that must answer with JSON matching `schema`."""
-    body = json.dumps({
+    data = llm.chat({
         "model": MODEL, "messages": messages, "temperature": 0,
         "response_format": {"type": "json_schema", "json_schema": {"name": name, "strict": True, "schema": schema}},
-    }).encode()
-    req = urllib.request.Request(API, data=body, headers={
-        "Authorization": f"Bearer {os.environ['OPENROUTER_API_KEY']}",
-        "Content-Type": "application/json", "X-Title": "Kinfind"})
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        data = json.load(resp)
+    }, timeout)
     text = data["choices"][0]["message"]["content"].strip()
     if text.startswith("```"):  # tolerate a fenced reply
         text = text.strip("`").removeprefix("json").strip()

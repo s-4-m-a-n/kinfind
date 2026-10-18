@@ -179,3 +179,18 @@ def test_private_keys_are_hidden_in_the_access_log():
     record.args = ("1.2.3.4", "GET", "/safe/c/CHECKIN-TOKEN", "1.1", 200)
     HideSecretsInLogs().filter(record)
     assert "CHECKIN-TOKEN" not in record.getMessage()
+
+
+def test_map_tiles_session_is_shared_and_names_our_site(monkeypatch):
+    from app import maps
+    calls = []
+    monkeypatch.setenv("MAPS_API_KEY", "test-key")
+    monkeypatch.setattr(maps, "_session", {})
+    monkeypatch.setattr(maps, "_new_session", lambda key, referer: calls.append(referer) or {"token": "T", "expiry": 2**40})
+    with TestClient(app, base_url="https://kinfind.example") as client:
+        first, second = client.get("/map/tiles.json").json(), client.get("/map/tiles.json").json()
+    assert first == second and "session=T&key=test-key" in first["tiles"] and "{z}/{x}/{y}" in first["tiles"]
+    assert calls == ["https://kinfind.example/"]  # one session for everyone, created with our own address
+    monkeypatch.delenv("MAPS_API_KEY")
+    with TestClient(app) as client:
+        assert client.get("/map/tiles.json").json() == {}  # no key: zones.js falls back to OpenStreetMap

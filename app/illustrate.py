@@ -11,19 +11,15 @@ for viewing. Matching always uses the original photos, and the exact pencil sket
 """
 from __future__ import annotations
 
-import base64
 import io
-import json
 import logging
 import os
 import threading
 import time
-import urllib.request
 from pathlib import Path
 
-from . import db
+from . import db, llm
 
-API = "https://openrouter.ai/api/v1/chat/completions"
 MODEL = os.environ.get("AI_ILLUSTRATION_MODEL", "google/gemini-3.1-flash-image")
 DISCLAIMER = ("Approximate illustration — not a verified reconstruction.", "Obscured details are uncertain.")
 
@@ -34,7 +30,8 @@ Style: hand-drawn coloured-pencil illustration with soft, natural colour, on a p
 Keep the same framing, pose and proportions as the photo.
 
 Remove: blood, wounds, abrasions, swelling, discolouration, mud, silt, water, dirt, and any medical or
-recovery equipment except a scale ruler. Show clean, healthy skin in the person's natural skin tone.
+recovery equipment. If the photo has a scale ruler, keep it; never add one. Show clean, healthy skin in
+the person's natural skin tone.
 
 Preserve exactly, in the same position, shape, size and colours: every tattoo (including all line work
 and any lettering, letter for letter), birthmarks, moles, scars, piercings, hair and any visible
@@ -42,7 +39,7 @@ clothing. If a face is visible, keep its features, with eyes closed and a calm e
 
 Do not invent, complete or "improve" details that are hidden or unclear: leave them faint or unfinished
 instead. Do not add moles, spots, marks or tattoos that are not clearly visible in the photo. Do not add
-any text, labels or watermarks."""
+any text, labels, watermarks, rulers or scale bars that are not in the photo."""
 
 FONT_PATHS = ["/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"]
 RETRY_AFTER = 3600  # seconds before retrying a photo whose illustration failed
@@ -52,7 +49,7 @@ _lock = threading.Lock()
 
 
 def enabled() -> bool:
-    return bool(os.environ.get("OPENROUTER_API_KEY"))
+    return llm.enabled()
 
 
 def path_for(filename: str) -> Path:
@@ -74,18 +71,7 @@ def redraw(src: Path) -> bytes:
         im.thumbnail((1536, 1536))
         buf = io.BytesIO()
         im.save(buf, "JPEG", quality=90)
-    body = json.dumps({"model": MODEL, "modalities": ["image", "text"], "messages": [{"role": "user", "content": [
-        {"type": "text", "text": PROMPT},
-        {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode()}},
-    ]}]}).encode()
-    req = urllib.request.Request(API, data=body, headers={
-        "Authorization": f"Bearer {os.environ['OPENROUTER_API_KEY']}",
-        "Content-Type": "application/json", "X-Title": "Kinfind"})
-    with urllib.request.urlopen(req, timeout=180) as resp:
-        msg = json.load(resp)["choices"][0]["message"]
-    if not msg.get("images"):
-        raise RuntimeError(f"The image model returned no image: {str(msg.get('content'))[:200]}")
-    return base64.b64decode(msg["images"][0]["image_url"]["url"].split(",", 1)[1])
+    return llm.generate_image(MODEL, PROMPT, buf.getvalue())
 
 
 def _font(size: int, bold: bool = True):

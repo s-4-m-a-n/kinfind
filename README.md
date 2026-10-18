@@ -20,7 +20,7 @@ uvicorn app.main:app --reload --port 8765
 - Family: http://localhost:8765 → *Report a missing person*. The case page has a private link that always opens the case. Families can also create an optional account (*Sign in*) to keep all their cases and check-ins in one place.
 - Home page: a world map of disaster zones that stays usable with thousands of them. Pins are grouped into clusters that split apart as you zoom in, and affected-area circles are drawn only once zoomed in. The map opens near the visitor, using the browser's time zone (e.g. `Asia/Kathmandu` → Kathmandu) with the closest few zones in view, so people in Nepal see Nepal's disasters first. No permission prompt is needed and nothing is sent anywhere. The lookup table `app/static/tz_coords.json` is built from the public tz database by `tools/build_tz_coords.py`. The list under the map shows the zones in the area you are looking at, nearest first, 8 at a time. A search box filters zones by place, country or type of disaster, and *Zones near me* sorts them by distance from you (your location never leaves the browser). Zones load from `/zones.json`, a compact cached feed, so the page itself stays small. `/zones` lists every zone with search and pages and works without JavaScript. Choosing a zone opens the report form with that disaster already selected, and long zone dropdowns on forms get a type-to-filter box.
 - New zones come from three places: responders add them directly, families suggest one at `/zones/new`, and the server pulls Orange and Red alerts from [GDACS](https://www.gdacs.org) every hour (`GDACS_SYNC_MINUTES`; `0` turns it off). Suggestions wait at `/responder/zones` until a responder approves, merges or rejects them. Families can report into a zone they suggested while it is still awaiting review.
-- Settings such as `OPENROUTER_API_KEY` go in a `.env` file in the project root. Copy `.env.example` to start; `.env` is git-ignored and read when the server starts.
+- Settings such as `VERTEX_PROJECT` go in a `.env` file in the project root. Copy `.env.example` to start; `.env` is git-ignored and read when the server starts.
 - Responder: http://localhost:8765/responder/login. Each responder has their own account. The demo seed adds `admin@kinfind.demo` / `kinfind-admin` and `responder@kinfind.demo` / `kinfind-responder`.
 
 ## Accounts
@@ -97,7 +97,7 @@ Limits are kept in memory per server process. **Behind a reverse proxy, set `TRU
 ## Security
 
 - **Photos are cleaned on upload** ([app/photos.py](app/photos.py)): re-saved from their pixels alone, which removes GPS location, camera and owner details, and scaled to at most 4096 px. Images over 40 megapixels are refused, which stops decompression bombs. For photos uploaded before this, run `python -m tools.clean_uploads`.
-- **Headers on every response:** a Content-Security-Policy (only Leaflet and OpenStreetMap tiles load from elsewhere; no framing), `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: strict-origin-when-cross-origin` (other sites get only the site's origin, never a private link; OpenStreetMap's tile servers need at least that), and HSTS over HTTPS. Responder pages, case pages and check-in pages are sent with `Cache-Control: no-store`.
+- **Headers on every response:** a Content-Security-Policy (only Google map tiles and Google's sign-in button load from elsewhere; Leaflet is served by the app; no framing), `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: strict-origin-when-cross-origin` (other sites get only the site's origin, never a private link; the referrer-restricted Maps key needs at least that), and HSTS over HTTPS. Responder pages, case pages and check-in pages are sent with `Cache-Control: no-store`.
 - **Cookies** are HttpOnly and SameSite=Strict, and Secure whenever the site is reached over HTTPS (including behind Cloud Run, via `X-Forwarded-Proto`).
 - **Private-link keys are hidden in the access log** (`?k=` values and `/safe/c/` tokens). Your hosting platform may keep its own request logs with full URLs, so limit who can read them.
 - **Sign-in lockout** counts failures per email *and* address, so someone guessing can't lock the real responder out; a higher limit per email alone (50 in 15 minutes) stops guessing from many addresses.
@@ -119,7 +119,7 @@ All of the matching code is in [app/matching.py](app/matching.py). It is made of
 
 Only photos of people recorded as **deceased** are filtered. Families' photos and photos of people found alive are always shown as they are. Each responder chooses how filtered photos appear, and the setting is remembered:
 
-- **Illustration** (the default when `OPENROUTER_API_KEY` is set): an image model redraws the photo as a colour-pencil illustration with blood, injuries and dirt removed, keeping tattoos, marks, hair and clothing ([app/illustrate.py](app/illustrate.py)). Each illustration gets a header with the record ref and sex, and the footer *"Approximate illustration — not a verified reconstruction."* It is made once per photo (about $0.07) and cached in `data/uploads/illustration/`. The pencil sketch is shown until it is ready. Set `AI_ILLUSTRATION_MODEL` to change the model.
+- **Illustration** (the default when AI is on, see below): an image model redraws the photo as a colour-pencil illustration with blood, injuries and dirt removed, keeping tattoos, marks, hair and clothing ([app/illustrate.py](app/illustrate.py)). Each illustration gets a header with the record ref and sex, and the footer *"Approximate illustration — not a verified reconstruction."* It is made once per photo (about $0.07) and cached in `data/uploads/illustration/`. The pencil sketch is shown until it is ready. Set `AI_ILLUSTRATION_MODEL` to change the model.
 - **Sketch**: an exact pencil sketch made locally with an image filter ([app/sketch.py](app/sketch.py)). It keeps tattoo lines and lettering exactly, invents nothing, and removes colour and skin texture.
 - **Unfiltered**: the original photo, shown only after a graphic-content warning is confirmed. This applies to the page-wide setting and to the *Unfiltered ↗* link on each photo, and without JavaScript a warning page is shown instead.
 
@@ -127,7 +127,7 @@ Illustrations can drift, for example by adding a mole that isn't there, so they 
 
 ## AI photo check (optional)
 
-Set `OPENROUTER_API_KEY` in `.env` to turn it on. Results are for responders only. All of the code is in [app/ai_match.py](app/ai_match.py):
+Turned on by `VERTEX_PROJECT` (Gemini on Vertex AI in that Google Cloud project, signed in as the server's Google identity, no API key) or, if that isn't set, `OPENROUTER_API_KEY`. The switch is in [app/llm.py](app/llm.py). Results are for responders only. All of the code is in [app/ai_match.py](app/ai_match.py):
 
 1. **Describe.** Each distinctive-feature photo is turned into a structured description once (motifs, exact lettering, colours, style, placement), using what the family or responder typed as context.
 2. **Screen.** When a record is saved, its feature descriptions are compared with every candidate in the zone in one text-only call. This also catches a family who only *described* a tattoo.
@@ -143,7 +143,7 @@ app/matching.py   scoring
 app/db.py         SQLite schema + loaders
 app/seed.py       demo data
 app/templates/    server-rendered HTML (no JS framework)
-app/static/zones.js  zones map (Leaflet + OpenStreetMap tiles)
+app/static/zones.js  zones map (Leaflet + Google Maps tiles via the Map Tiles API; app/maps.py)
 app/gdacs.py      suggested zones from GDACS alerts
 app/ai_match.py   AI photo check: describe -> screen -> compare
 app/safe.py       "I'm safe" check-ins: name + phone matching
@@ -164,5 +164,5 @@ This is a prototype. Before deploying it:
 - Use HTTPS, encrypt photos at rest, and set `TRUSTED_PROXY_HOPS` for your proxy.
 - Move rate limits to shared storage (e.g. Redis) if you run more than one server process.
 - Write a data-retention policy. Check consent and legal requirements in each region.
-- Use a map tile provider that allows production traffic. The public OpenStreetMap tile servers are only for light use, and each map load sends the visitor's IP address to them.
+- Map tiles come from Google's Map Tiles API (`MAPS_API_KEY`, 100,000 free tile requests a month, then billed to the Google Cloud project). Without a key the maps fall back to the public OpenStreetMap tile servers, which are only for light use.
 - Before sending real photos to an AI provider, check its data-retention terms and get consent and legal approval. Photos of the deceased are especially sensitive.

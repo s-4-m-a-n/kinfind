@@ -42,7 +42,7 @@ def load_env_file(path: Path) -> None:
 
 load_env_file(Path(__file__).resolve().parent.parent / ".env")  # before anything reads os.environ
 
-from . import accounts, ai_match, db, gdacs, illustrate, limits, photos, safe, sketch  # noqa: E402
+from . import accounts, ai_match, db, gdacs, illustrate, limits, maps, photos, safe, sketch  # noqa: E402
 from .matching import BODY_LOCATIONS, FEATURE_KINDS, HAIR_COLORS, rank_found, rank_missing  # noqa: E402
 
 APP_DIR = Path(__file__).resolve().parent
@@ -135,21 +135,23 @@ def is_https(scope) -> bool:
     return scope.get("scheme") == "https" or proto.split(",")[0].strip() == "https"
 
 
-# Map tiles, Leaflet and Google's sign-in button are the only things loaded from elsewhere.
-# Inline scripts and styles are still used by the templates, hence 'unsafe-inline'.
+# Google map tiles and Google's sign-in button are the only things loaded from elsewhere
+# (Leaflet is served from /static/vendor). Inline scripts and styles are still used by the
+# templates, hence 'unsafe-inline'.
 GSI = "https://accounts.google.com/gsi/"
+TILES = maps.API if maps.api_key() else "https://tile.openstreetmap.org"
 CSP = "; ".join([
-    "default-src 'self'", f"script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com {GSI}client",
-    f"style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com {GSI}style",
-    "img-src 'self' data: blob: https://tile.openstreetmap.org https://cdnjs.cloudflare.com",
-    f"connect-src 'self' {GSI}", f"frame-src {GSI}", "object-src 'none'", "base-uri 'self'",
+    "default-src 'self'", f"script-src 'self' 'unsafe-inline' {GSI}client",
+    f"style-src 'self' 'unsafe-inline' {GSI}style",
+    f"img-src 'self' data: blob: {TILES}",
+    f"connect-src 'self' {GSI} {TILES}", f"frame-src {GSI}", "object-src 'none'", "base-uri 'self'",
     "form-action 'self'", "frame-ancestors 'none'"])
 SECURITY_HEADERS = {
     "Content-Security-Policy": CSP,
     "X-Content-Type-Options": "nosniff",
     "X-Frame-Options": "DENY",
     # Private links carry their key in the URL: other sites only ever get our origin, never the path
-    # or query. (No Referer at all would break the map: OpenStreetMap's tile servers require one.)
+    # or query. (No Referer at all would break the map: the Maps key is restricted by referrer.)
     "Referrer-Policy": "strict-origin-when-cross-origin",
     "Permissions-Policy": "camera=(), microphone=(), geolocation=(self)",
 }
@@ -822,6 +824,18 @@ def zones_json():
         rows = conn.execute("""SELECT id, name, region, lat, lng, radius_km, COALESCE(started_on, substr(created_at, 1, 10))
                                FROM disasters WHERE status = 'active' AND lat IS NOT NULL ORDER BY id DESC""").fetchall()
     return JSONResponse({"zones": [list(r) for r in rows]}, headers={"Cache-Control": "public, max-age=60"})
+
+
+@app.get("/map/tiles.json")
+def map_tiles(request: Request):
+    """Google map tile URLs for zones.js ({} without a Maps key: OpenStreetMap is used instead)."""
+    origin = f"{'https' if is_https(request.scope) else 'http'}://{request.headers.get('host', '')}"
+    try:
+        data = maps.tiles(origin)
+    except Exception as exc:  # Map Tiles API down: zones still show, on a plain background
+        log.warning("Google map tiles unavailable: %s", exc)
+        data = {"unavailable": True}
+    return JSONResponse(data, headers={"Cache-Control": "no-store"})
 
 
 @app.get("/zones")

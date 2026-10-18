@@ -1,0 +1,9 @@
+# Continuous copy of the SQLite database to Cloud Storage (https://litestream.io).
+# Uses the Cloud Run service account; no keys needed.
+dbs:
+  - path: ${DISASTERLENS_DATA}/disasterlens.db
+    replicas:
+      - type: gcs
+        bucket: ${LITESTREAM_BUCKET}
+        path: database
+        sync-interval: 1s

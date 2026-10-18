@@ -271,7 +271,7 @@ select.status-confirmed { color: var(--high); background: var(--high-soft); }
 .map-ready .map-fallback { display: none; }
 .map.leaflet-container { font: inherit; background: var(--bg); }
 @media (prefers-color-scheme: dark) {
-  .map .leaflet-tile-pane { filter: invert(1) hue-rotate(180deg) brightness(.9) contrast(.85) saturate(.6); }
+  .map:not(.google-tiles) .leaflet-tile-pane { filter: invert(1) hue-rotate(180deg) brightness(.9) contrast(.85) saturate(.6); }
   .map .leaflet-control-zoom a, .map .leaflet-control-attribution { background: var(--surface); color: var(--text); border-color: var(--line); }
 }
 .map .leaflet-control-attribution a { color: var(--accent); }
