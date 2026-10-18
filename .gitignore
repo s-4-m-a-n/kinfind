@@ -1,0 +1,11 @@
+# Local data: database, uploaded photos, sketches and illustrations
+data/
+
+# Secrets
+.env
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/

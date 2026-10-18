@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% import "_map_assets.html" as map_assets %}
+{% block title %}{{ 'Suggest a disaster zone' if public else 'Add a disaster zone' }} · {{ app_name }}{% endblock %}
+{% block head %}{{ map_assets.head() }}{% endblock %}
+{% block scripts %}{{ map_assets.scripts(zones) }}{% endblock %}
+{% block content %}
+<p class="back"><a href="{{ '/#zones' if public else '/responder' }}">← {{ 'Back to the map' if public else 'Dashboard' }}</a></p>
+<header class="page-head">
+  {% if public %}
+  <h1>Suggest a disaster zone</h1>
+  <p class="lede">If the disaster you are affected by is not on the map, tell us where it is. You can file your
+    report straight away. Responders review every new zone before it appears on the public map.</p>
+  {% else %}
+  <h1>Add a disaster zone</h1>
+  <p class="lede">Families pick a zone on the home page map, and their reports are matched only with people
+    found in the same zone. The name, region and area are shown publicly.</p>
+  {% endif %}
+</header>
+
+<form method="post" action="{{ '/zones' if public else '/responder/disasters' }}" class="stack">
+  <fieldset>
+    <legend><span class="step">1</span>Disaster</legend>
+    <div class="grid">
+      <label><span>Name <span class="req" aria-hidden="true">*</span></span>
+        <input name="name" required placeholder="{{ 'e.g. Landslide in Melamchi' if public else 'e.g. Koshi River Flood 2026' }}"></label>
+      <label><span>Affected region <span class="req" aria-hidden="true">*</span></span>
+        <input name="region" required placeholder="e.g. Sindhupalchok, Nepal"></label>
+    </div>
+    {% if public %}
+    <label>What happened, and when?
+      <textarea name="note" rows="2" placeholder="e.g. Landslide hit the village on 12 October, several houses buried"></textarea></label>
+    {% endif %}
+  </fieldset>
+
+  <fieldset>
+    <legend><span class="step">2</span>Affected area</legend>
+    <p class="hint">Click the centre of the affected area on the map, then set how far it reaches.
+      {% if public %}Zones already on the map are shown in grey. If yours is one of them, <a href="/#zones">choose it there</a> instead.
+      {% else %}Existing zones are shown in grey.{% endif %}</p>
+    <div id="zone-map" class="map tall" data-mode="pick" role="region" aria-label="Map: click to place the zone">
+      <p class="map-fallback">The map could not load. Enter the coordinates below instead.</p>
+    </div>
+    <div class="grid">
+      <label><span>Latitude <span class="req" aria-hidden="true">*</span></span>
+        <input name="lat" type="number" step="any" min="-90" max="90" required inputmode="decimal"></label>
+      <label><span>Longitude <span class="req" aria-hidden="true">*</span></span>
+        <input name="lng" type="number" step="any" min="-180" max="180" required inputmode="decimal"></label>
+      <label><span>Radius (km) <span class="req" aria-hidden="true">*</span></span>
+        <input name="radius_km" type="number" step="any" min="1" max="1000" value="30" required inputmode="decimal"></label>
+    </div>
+  </fieldset>
+
+  <div class="submit-bar">
+    {% if public %}
+    <p class="hint">Next, you'll fill in the missing person report for this zone.</p>
+    <button type="submit" data-busy="Saving…">Suggest zone and continue</button>
+    {% else %}
+    <p class="hint">The zone appears on the home page map straight away.</p>
+    <button type="submit" data-busy="Saving…">Add zone</button>
+    {% endif %}
+  </div>
+</form>
+{% endblock %}

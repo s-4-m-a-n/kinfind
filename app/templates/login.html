@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block title %}Responder sign in · {{ app_name }}{% endblock %}
+{% block content %}
+<form method="post" action="/responder/login" class="stack narrow">
+  <h1>Responder sign in</h1>
+  <p class="hint">For rescue teams, hospitals and authorities logging found people.</p>
+  {% if error %}<p class="error">{{ error }}</p>{% endif %}
+  <label>Access key <input type="password" name="key" required autofocus></label>
+  <button>Sign in</button>
+</form>
+{% endblock %}

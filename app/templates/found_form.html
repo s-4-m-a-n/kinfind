@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block title %}Log a found person · {{ app_name }}{% endblock %}
+{% block content %}
+<header class="page-head">
+  <h1>Log a found person or recovered body</h1>
+  <p class="lede">Status and facility are visible to responders only. Families see the found location and date.</p>
+</header>
+
+<form method="post" action="/responder/found" enctype="multipart/form-data" class="stack">
+  <fieldset>
+    <legend><span class="step">1</span>Where &amp; when</legend>
+    <div class="grid">
+      <label><span>Disaster <span class="req" aria-hidden="true">*</span></span>
+        <select name="disaster_id" required>
+          <option value="">Choose…</option>
+          {% for d in disasters %}<option value="{{ d.id }}" {% if d.id == selected %}selected{% endif %}>{{ d.name }} — {{ d.region }}</option>{% endfor %}
+        </select>
+      </label>
+      <label><span>Status <span class="req" aria-hidden="true">*</span></span>
+        <select name="status" required><option value="">Choose…</option><option value="alive">Alive — unidentified</option><option value="deceased">Deceased</option></select>
+      </label>
+    </div>
+    <div class="grid">
+      <label><span>Found at <span class="req" aria-hidden="true">*</span></span> <input name="found_place" required placeholder="Shown to families"></label>
+      <label>Found on <input name="found_date" type="date"></label>
+    </div>
+    <label>Current facility <span class="tag">responders only</span>
+      <input name="facility" placeholder="Hospital, shelter or morgue holding the person"></label>
+  </fieldset>
+
+  <fieldset>
+    <legend><span class="step">2</span>Description</legend>
+    <div class="grid">
+      <label>Sex
+        <select name="sex"><option value="unknown">Unknown</option><option value="female">Female</option><option value="male">Male</option></select>
+      </label>
+      <label>Estimated age from <input name="age_min" type="number" min="0" max="120"></label>
+      <label>to <input name="age_max" type="number" min="0" max="120"></label>
+      <label>Height (cm) <input name="height_cm" type="number" min="40" max="250"></label>
+      <label>Hair colour
+        <select name="hair_color"><option value="">Unknown</option>{% for h in hair_colors %}<option value="{{ h }}">{{ h|capitalize }}</option>{% endfor %}</select>
+      </label>
+    </div>
+    <label>Clothing &amp; belongings <textarea name="clothing" rows="2"></textarea></label>
+    <label>Other description <textarea name="description" rows="3"></textarea></label>
+  </fieldset>
+
+  {% with step=3, photo_note="responders only" %}{% include "_features.html" %}{% endwith %}
+
+  <fieldset>
+    <legend><span class="step">4</span>Photos <span class="tag">responders only</span></legend>
+    {% include "_photo_list.html" %}
+  </fieldset>
+
+  <div class="submit-bar">
+    <p class="hint">Families will see only the found location and date.</p>
+    <button type="submit" data-busy="Saving…">Save and find possible matches</button>
+  </div>
+</form>
+{% endblock %}

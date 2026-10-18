@@ -1,0 +1,7 @@
+{# Match score as a number, a plain-words label and a small meter. Expects `m.score`. #}
+{% set level = 'high' if m.score >= 70 else 'mid' %}
+<div class="score {{ level }}">
+  <span class="score-num">{{ m.score }}%</span>
+  <span class="score-label">{{ 'Strong' if level == 'high' else 'Possible' }}</span>
+  <span class="meter" aria-hidden="true"><span style="width: {{ m.score }}%"></span></span>
+</div>

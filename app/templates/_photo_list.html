@@ -1,0 +1,8 @@
+{# Multi-photo picker with removable thumbnails (wired up in base.html). #}
+<label class="dropzone">
+  <input type="file" name="photos" accept="image/jpeg,image/png,image/webp" multiple data-photo-list="photo-thumbs">
+  <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5M4 16v3h16v-3"/></svg>
+  <span><strong>Choose photos</strong> — JPEG, PNG or WebP, up to 8 MB each</span>
+</label>
+<div id="photo-thumbs" class="thumbs" aria-live="polite"></div>
+<p class="field-error" hidden></p>

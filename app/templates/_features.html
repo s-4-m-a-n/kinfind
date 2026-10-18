@@ -1,0 +1,12 @@
+{# Repeating "distinctive feature" rows shared by both report forms. #}
+<fieldset>
+  <legend><span class="step">{{ step }}</span>Distinctive features</legend>
+  <p class="hint">Tattoos, scars, birthmarks, piercings, dental work. These matter most for matching —
+    describe the design, colour, words and where on the body. Add a close-up photo if you have one
+    {%- if photo_note %} ({{ photo_note }}){% endif %}.</p>
+  <div id="features" class="feature-list">
+    {% for _ in range(2) %}{% include "_feature_row.html" %}{% endfor %}
+  </div>
+  <button type="button" class="secondary" data-add-feature>+ Add another feature</button>
+  <template id="feature-row">{% include "_feature_row.html" %}</template>
+</fieldset>

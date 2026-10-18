@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}Case {{ case.ref }} · {{ app_name }}{% endblock %}
+{% block content %}
+{% set link = request.url.include_query_params(k=k).remove_query_params('new') %}
+{% if new %}
+<div class="notice" role="status">
+  <strong>Your report is saved.</strong>
+  <span>Save this private link. It is the <strong>only</strong> way back to this case, so bookmark it or send it to yourself.</span>
+  <div class="copy-row">
+    <input id="case-link" class="copy" readonly value="{{ link }}" onclick="this.select()" aria-label="Private case link">
+    <button type="button" class="secondary" data-copy="case-link">Copy link</button>
+  </div>
+</div>
+{% endif %}
+
+<header class="page-head">
+  <p class="eyebrow">Case {{ case.ref }} · {{ disaster.name }}, {{ disaster.region }}</p>
+  <h1>Searching for {{ case.full_name }}</h1>
+  <ul class="chips">
+    {% if case.last_seen_place or case.last_seen_date %}<li>Last seen {% if case.last_seen_place %}at {{ case.last_seen_place }}{% endif %}{% if case.last_seen_date %} on {{ case.last_seen_date }}{% endif %}</li>{% endif %}
+    <li>{{ case.features|length }} distinctive feature{{ '' if case.features|length == 1 else 's' }}</li>
+    <li>{{ photos }} photo{{ '' if photos == 1 else 's' }} on file</li>
+  </ul>
+</header>
+
+<h2>Possible matches {% if matches %}<span class="count">{{ matches|length }}</span>{% endif %}</h2>
+{% if not matches %}
+  <div class="empty">
+    <p><strong>No similar records yet.</strong> Responders record new people every day. This page checks again
+      every time you open it, so come back using your private link.</p>
+  </div>
+{% else %}
+  <p class="hint">Based on the description only. A possible match is <strong>not</strong> a confirmed identification.</p>
+  <ul class="matches">
+  {% for m in matches %}
+    <li class="match">
+      {% include "_score.html" %}
+      <div class="body">
+        <h3>Found at {{ m.found_place }}</h3>
+        <p class="meta">{% if m.found_date %}On {{ m.found_date }} · {% endif %}Record {{ m.ref }}</p>
+        {% if m.reasons %}<ul class="reasons">{% for r in m.reasons %}<li>{{ r }}</li>{% endfor %}</ul>{% endif %}
+      </div>
+      <div class="action">
+        {% if m.request_status == 'open' %}<span class="pill">Verification requested</span>
+          <small>A responder will contact you.</small>
+        {% elif m.request_status == 'contacted' %}<span class="pill">Responder in contact</span>
+        {% elif m.request_status == 'confirmed' %}<span class="pill strong">Confirmed by responder</span>
+        {% else %}
+          <form method="post" action="/case/{{ case.ref }}/verify/{{ m.ref }}">
+            <input type="hidden" name="k" value="{{ k }}">
+            <button data-busy="Requesting…">Request verification</button>
+          </form>
+        {% endif %}
+      </div>
+    </li>
+  {% endfor %}
+  </ul>
+  <p class="note">When you request verification, a responder compares the record with your photos and contacts
+    you on the details you provided. For everyone's safety, holding locations and photos are not shared here.</p>
+{% endif %}
+{% endblock %}

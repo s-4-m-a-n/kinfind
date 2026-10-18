@@ -1,0 +1,28 @@
+{# Responder photo thumbnail. Photos of deceased people follow the responder's filter setting;
+   all other photos are shown as they are. #}
+{% macro photo(pid, alt, sensitive=false, cls='') -%}
+{% if not sensitive %}
+<span class="photo-wrap {{ cls }}"><a href="/responder/photos/{{ pid }}" target="_blank"><img src="/responder/photos/{{ pid }}" alt="{{ alt }}" loading="lazy"></a></span>
+{% elif photo_view == 'original' %}
+<span class="photo-wrap {{ cls }}">
+  <a href="/responder/photos/{{ pid }}?view=original&amp;confirm=1" target="_blank"><img src="/responder/photos/{{ pid }}?view=original&amp;confirm=1" alt="{{ alt }} (unfiltered)" loading="lazy"></a>
+  <span class="photo-badge">Unfiltered</span>
+</span>
+{% else %}
+<span class="photo-wrap {{ cls }}">
+  <a href="/responder/photos/{{ pid }}?view={{ photo_view }}" target="_blank"><img src="/responder/photos/{{ pid }}?view={{ photo_view }}" alt="{{ alt }} ({{ photo_view }})" loading="lazy"></a>
+  <a class="original-link" href="/responder/photos/{{ pid }}?view=original" target="_blank" data-graphic
+     title="Show the unfiltered photo. It may be graphic.">Unfiltered ↗</a>
+</span>
+{% endif %}
+{%- endmacro %}
+
+{% macro view_toggle(next, illustration_available) -%}
+<form method="post" action="/responder/photo-view" class="photo-toggle" data-graphic-form aria-label="How photos of deceased people are shown">
+  <input type="hidden" name="next" value="{{ next }}">
+  <span class="photo-toggle-label">Photos of the deceased</span>
+  {% if illustration_available %}<button name="view" value="illustration" class="{{ 'on' if photo_view == 'illustration' }}" aria-pressed="{{ 'true' if photo_view == 'illustration' else 'false' }}">Illustration</button>{% endif %}
+  <button name="view" value="sketch" class="{{ 'on' if photo_view == 'sketch' }}" aria-pressed="{{ 'true' if photo_view == 'sketch' else 'false' }}">Sketch</button>
+  <button name="view" value="original" class="{{ 'on' if photo_view == 'original' }}" aria-pressed="{{ 'true' if photo_view == 'original' else 'false' }}">Unfiltered</button>
+</form>
+{%- endmacro %}

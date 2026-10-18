@@ -1,0 +1,25 @@
+<div class="feature-row">
+  <div class="feature-fields">
+    <select name="feature_kind" aria-label="Type">
+      <option value="">Type…</option>
+      {% for k in feature_kinds %}<option value="{{ k }}">{{ k|capitalize }}</option>{% endfor %}
+    </select>
+    <select name="feature_location" aria-label="Location on body">
+      {% for loc in body_locations %}<option value="{{ loc }}" {% if loc == 'unknown' %}selected{% endif %}>{{ 'Location unknown' if loc == 'unknown' else loc|capitalize }}</option>{% endfor %}
+    </select>
+    <input name="feature_text" placeholder="e.g. blue anchor with rope, word 'MAA' underneath" aria-label="Description">
+  </div>
+  <div class="photo-slot">
+    <label class="photo-pick" title="Add a close-up photo of this feature">
+      <input type="file" name="feature_photo" accept="image/jpeg,image/png,image/webp" data-photo-input>
+      <span class="photo-pick-empty" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="20" height="20"><path fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" d="M4 8h3l2-2.5h6L17 8h3v11H4zM12 16.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7z"/></svg>
+        Photo
+      </span>
+      <span class="sr-only">Photo of this feature (optional)</span>
+    </label>
+    <button type="button" class="photo-clear" data-clear-photo aria-label="Remove photo" hidden>×</button>
+  </div>
+  <button type="button" class="icon-button" data-remove-feature aria-label="Remove this feature">×</button>
+  <p class="field-error" hidden></p>
+</div>

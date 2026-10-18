@@ -1,0 +1,155 @@
+{% extends "base.html" %}
+{% import "_photo.html" as ph with context %}
+{% block title %}{{ record.ref }} · {{ app_name }}{% endblock %}
+{% block content %}
+{% set r = record %}
+<p class="back"><a href="/responder">← Dashboard</a></p>
+<header class="page-head">
+{% if kind == 'found' %}
+  <p class="eyebrow">Found record</p>
+  <h1>{{ r.ref }} <span class="pill {{ 'strong' if r.status == 'alive' }}">{{ r.status|capitalize }}</span></h1>
+  <p class="meta">Found at {{ r.found_place }}{% if r.found_date %} on {{ r.found_date }}{% endif %}
+    {% if r.facility %}· now at <strong>{{ r.facility }}</strong>{% endif %}</p>
+{% else %}
+  <p class="eyebrow">Missing report · {{ r.ref }}</p>
+  <h1>{{ r.full_name }}</h1>
+  <p class="meta">Reported by {{ r.reporter_name }} ({{ r.reporter_contact }})
+    {% if r.last_seen_place %}· last seen at {{ r.last_seen_place }}{% endif %}{% if r.last_seen_date %} on {{ r.last_seen_date }}{% endif %}</p>
+{% endif %}
+</header>
+
+{# Photos of deceased people are filtered; everything else is shown as it is. #}
+{% set own_sensitive = kind == 'found' and r.status == 'deceased' %}
+{% set own_photo_ids = photo_ids + feature_photos.values()|sum(start=[]) %}
+{% set other_sensitive = kind == 'missing' and ai_results|selectattr('other_status', 'equalto', 'deceased')|selectattr('other_photo_ids')|list %}
+{% set shown_sensitive = (own_photo_ids if own_sensitive else []) + (other_sensitive|map(attribute='other_photo_ids')|sum(start=[])) %}
+{% if shown_sensitive %}
+<div class="photo-setting {{ 'unfiltered' if photo_view == 'original' }}">
+  {{ ph.view_toggle(request.url.path, ai_enabled) }}
+  <p class="hint">
+  {% if photo_view == 'original' %}<strong>Showing unfiltered photos of the deceased.</strong> They may be graphic.
+  {% elif photo_view == 'illustration' %}Colour illustrations with blood and injuries removed. They are approximate, so use
+    <em>Sketch</em> for exact lines or <em>Unfiltered ↗</em> on a photo before relying on a detail.
+  {% else %}Pencil sketches keep the exact lines of tattoos, scars and marks without graphic detail.
+    Use <em>Unfiltered ↗</em> on a photo to see it in full.{% endif %}</p>
+  {% if photo_view == 'illustration' %}
+    {% set waiting = shown_sensitive|reject('illustration_ready')|unique|list %}
+    {% set failed = waiting|map('illustration_failure')|select|list %}
+    {% if failed %}<p class="notice" role="status">{{ failed|length }} illustration{{ ' ' if failed|length == 1 else 's ' }}could not be made,
+      so the sketch is shown instead. It will be tried again later. <small>({{ failed[0] }})</small></p>
+    {% elif waiting %}<p class="notice" role="status">Preparing {{ waiting|length }} illustration{{ '' if waiting|length == 1 else 's' }}.
+      Sketches are shown until they're ready. <a href="" onclick="location.reload(); return false">Refresh</a></p>{% endif %}
+  {% endif %}
+</div>
+{% endif %}
+
+<dl class="facts">
+  <dt>Sex</dt><dd>{{ r.sex or '—' }}</dd>
+  <dt>Age</dt><dd>{% if kind == 'found' %}{{ r.age_min or '?' }}–{{ r.age_max or '?' }}{% else %}{{ r.age or '—' }}{% endif %}</dd>
+  <dt>Height</dt><dd>{{ r.height_cm ~ ' cm' if r.height_cm else '—' }}</dd>
+  <dt>Hair</dt><dd>{{ r.hair_color or '—' }}</dd>
+  <dt>Clothing</dt><dd>{{ r.clothing or '—' }}</dd>
+  <dt>Description</dt><dd>{{ r.description or '—' }}</dd>
+</dl>
+
+<h2>Distinctive features</h2>
+{% if r.features %}
+<ul class="features">
+{% for f in r.features %}
+  <li>
+    <div>
+      <strong>{{ f.kind|capitalize }}</strong>{% if f.location != 'unknown' %} · {{ f.location }}{% endif %}
+      {% if f.text %}<p>{{ f.text }}</p>{% endif %}
+      {% if f.ai_description %}{% set d = f.ai_description %}
+      <p class="ai-desc"><span class="tag">AI description</span> {{ d.style }}{% if d.motifs %} · {{ d.motifs|join(', ') }}{% endif %}{% if d.lettering %} · lettering “{{ d.lettering|join(' ') }}”{% endif %}{% if d.colours %} · {{ d.colours|join(', ') }}{% endif %} · seen at {{ d.placement }}{% if d.distinctive_details %} · {{ d.distinctive_details|join('; ') }}{% endif %}</p>
+      {% endif %}
+    </div>
+    {% for pid in feature_photos.get(f.id, []) %}
+      {{ ph.photo(pid, "Photo of " ~ f.kind, own_sensitive, "photo") }}
+    {% endfor %}
+  </li>
+{% endfor %}
+</ul>
+{% else %}<p class="empty">None recorded.</p>{% endif %}
+
+{% if photo_ids %}
+<h2>Photos</h2>
+<div class="photos">{% for pid in photo_ids %}{{ ph.photo(pid, "Photo " ~ loop.index, own_sensitive) }}{% endfor %}</div>
+{% endif %}
+
+{% if ai_enabled or ai_results %}
+{% set verdict_label = {'strong': 'Strong match', 'possible': 'Possible match', 'unlikely': 'Unlikely', 'insufficient': 'Not enough to judge'} %}
+<section id="ai" class="ai">
+  <div class="row-between">
+    <h2>AI photo check <span class="tag">responders only</span></h2>
+    {% if ai_enabled %}
+    <form method="post" action="/responder/{{ kind }}/{{ r.ref }}/ai-check" class="inline">
+      <button class="secondary" {% if ai_running %}disabled{% endif %}>{{ 'Checking…' if ai_running else 'Run check again' }}</button>
+    </form>
+    {% endif %}
+  </div>
+  <p class="hint">{{ ai_model }} describes each feature photo, screens every
+    {{ 'missing report' if kind == 'found' else 'found record' }} in this zone by those descriptions, then compares
+    photos side by side for the closest few. Faces are never used. These are suggestions, not identifications:
+    compare the photos yourself before contacting a family.</p>
+  {% if ai_running %}<p class="notice" role="status">Checking… this takes up to a minute. <a href="#ai" onclick="location.reload()">Refresh</a></p>{% endif %}
+  {% set mine = feature_photos.values()|sum(start=[]) %}
+  {% if not r.features %}<p class="empty">Add a distinctive feature, ideally with a photo, to run the AI check.</p>
+  {% elif not ai_results and not ai_running %}<p class="empty">No likely matches in this zone{% if ai_screened_out %} after screening {{ ai_screened_out }} record{{ '' if ai_screened_out == 1 else 's' }}{% endif %}.</p>{% endif %}
+  <ul class="ai-results">
+  {% for a in ai_results %}
+    <li class="ai-result verdict-{{ a.verdict or a.stage }}">
+      <div class="ai-head">
+        {% if a.stage == 'compared' %}
+          <span class="ai-score">{{ a.score }}%</span><span class="pill ai-verdict">{{ verdict_label[a.verdict] }}</span>
+        {% elif a.stage == 'error' %}<span class="pill">Check failed</span>
+        {% else %}<span class="ai-score">{{ a.shortlist_score }}%</span><span class="pill">Description match</span>{% endif %}
+        <h3>{% if kind == 'found' %}<a href="/responder/missing/{{ a.other_ref }}">{{ a.other_name }}</a> <small>{{ a.other_ref }}</small>
+            {% else %}<a href="/responder/found/{{ a.other_ref }}">{{ a.other_ref }}</a> <small>{{ a.other_status }} · {{ a.other_place }}</small>{% endif %}</h3>
+      </div>
+      {% if a.stage == 'compared' %}<p>{{ a.summary }}</p>
+      {% elif a.stage == 'comparing' %}<p class="meta">Shortlisted. Comparing photos…</p>
+      {% elif a.stage == 'shortlisted' %}<p class="meta">{{ 'This record has' if not mine else 'The other record has' }} no feature photo, so only the descriptions were compared.</p>
+      {% elif a.stage == 'error' %}<p class="meta">{{ a.error }}</p>{% endif %}
+      {% if a.shortlist_reason %}<p class="screen-note"><strong>Description screen {{ a.shortlist_score }}%:</strong> {{ a.shortlist_reason }}</p>{% endif %}
+      {% if mine or a.other_photo_ids %}
+      <div class="compare">
+        <figure><figcaption>This record</figcaption>
+          <div class="photos">{% for pid in mine[:4] %}{{ ph.photo(pid, "This record, feature photo " ~ loop.index, own_sensitive) }}{% else %}<span class="meta">No feature photo</span>{% endfor %}</div></figure>
+        <figure><figcaption>{{ a.other_name or a.other_ref }}</figcaption>
+          <div class="photos">{% for pid in a.other_photo_ids %}{{ ph.photo(pid, a.other_ref ~ ", feature photo " ~ loop.index, kind == 'missing' and a.other_status == 'deceased') }}{% else %}<span class="meta">No feature photo</span>{% endfor %}</div></figure>
+      </div>
+      {% endif %}
+      {% if a.consistent or a.conflicts %}
+      <div class="ai-lists">
+        {% if a.consistent %}<div><strong>Agrees</strong><ul class="checks">{% for c in a.consistent %}<li>{{ c }}</li>{% endfor %}</ul></div>{% endif %}
+        {% if a.conflicts %}<div><strong>Disagrees</strong><ul class="checks cross">{% for c in a.conflicts %}<li>{{ c }}</li>{% endfor %}</ul></div>{% endif %}
+      </div>
+      {% endif %}
+    </li>
+  {% endfor %}
+  </ul>
+  {% if ai_results and ai_screened_out %}<p class="hint">{{ ai_screened_out }} other record{{ '' if ai_screened_out == 1 else 's' }} screened out by description.</p>{% endif %}
+</section>
+{% endif %}
+
+<h2>{{ 'Missing reports that may match' if kind == 'found' else 'Found records that may match' }}</h2>
+{% if not matches %}<p class="empty">No similar records in this disaster yet.</p>{% endif %}
+<ul class="matches">
+{% for m in matches %}{% set o = m.record %}
+  <li class="match">
+    {% include "_score.html" %}
+    <div class="body">
+      {% if kind == 'found' %}
+        <h3><a href="/responder/missing/{{ o.ref }}">{{ o.full_name }}</a> <small>{{ o.ref }}</small></h3>
+        <p class="meta">Family: {{ o.reporter_name }} · {{ o.reporter_contact }}</p>
+      {% else %}
+        <h3><a href="/responder/found/{{ o.ref }}">{{ o.ref }}</a> · {{ o.status }}</h3>
+        <p class="meta">Found at {{ o.found_place }}{% if o.facility %} → {{ o.facility }}{% endif %}</p>
+      {% endif %}
+      <ul class="reasons">{% for reason in m.reasons %}<li>{{ reason }}</li>{% endfor %}</ul>
+    </div>
+  </li>
+{% endfor %}
+</ul>
+{% endblock %}

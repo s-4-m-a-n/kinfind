@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% import "_map_assets.html" as map_assets %}
+{% block title %}Zones to review · {{ app_name }}{% endblock %}
+{% block head %}{{ map_assets.head() }}{% endblock %}
+{% block scripts %}{{ map_assets.scripts(zones) }}{% endblock %}
+{% block content %}
+<p class="back"><a href="/responder">← Dashboard</a></p>
+<header class="page-head row-between">
+  <div>
+    <h1>Zones to review</h1>
+    <p class="lede">Suggestions from GDACS alerts and from families. Nothing here is public until you approve it.</p>
+  </div>
+  <div class="actions">
+    <form method="post" action="/responder/zones/sync" class="inline">
+      <button class="secondary" data-busy="Checking GDACS…">Check GDACS now</button>
+    </form>
+    <a class="button" href="/responder/disasters/new">+ Add zone</a>
+  </div>
+</header>
+
+{% if synced == 'error' %}<p class="notice" role="status">Couldn't reach GDACS just now. It is checked again automatically every hour.</p>
+{% elif synced %}<p class="notice" role="status">GDACS checked: {{ synced }} new suggestion{{ '' if synced == '1' else 's' }}.</p>{% endif %}
+
+<div id="zone-map" class="map" data-mode="review" role="region" aria-label="Map of zones awaiting review">
+  <p class="map-fallback">The map could not load.</p>
+</div>
+
+{% if not pending %}
+  <p class="empty">Nothing to review. New GDACS alerts (Orange and Red) and zones suggested by families will appear here.</p>
+{% endif %}
+<ul class="review-list">
+{% for z in pending %}
+  <li class="review">
+    <div class="review-head">
+      <div>
+        <p class="eyebrow">
+          {% if z.source == 'gdacs' %}GDACS · <span class="alert-{{ z.alert_level|lower }}">{{ z.alert_level }} alert</span>
+          {% else %}Suggested by a family{% endif %}
+          {% if z.started_on %} · since {{ z.started_on }}{% endif %}
+        </p>
+        <h3>{{ z.name }}</h3>
+        <p class="meta">{{ z.region }} · {{ z.lat|round(3) }}, {{ z.lng|round(3) }}
+          {% if z.source_url %}· <a href="{{ z.source_url }}" target="_blank" rel="noopener">GDACS report ↗</a>{% endif %}</p>
+        {% if z.note %}<p class="quote">“{{ z.note }}”</p>{% endif %}
+        {% if z.reports %}<p class="pill">{{ z.reports }} missing report{{ '' if z.reports == 1 else 's' }} already filed</p>{% endif %}
+      </div>
+      <button type="button" class="link" data-show-zone="{{ z.id }}">Show on map</button>
+    </div>
+
+    <div class="review-actions">
+      <form method="post" action="/responder/zones/{{ z.id }}" class="review-approve">
+        <input type="hidden" name="action" value="approve">
+        <label>Public name <input name="name" value="{{ z.name }}" required></label>
+        <label>Region <input name="region" value="{{ z.region }}" required></label>
+        <label>Radius (km) <input name="radius_km" type="number" min="1" max="1000" step="any" value="{{ z.radius_km|round(0)|int }}" required></label>
+        <button>Approve</button>
+      </form>
+      <div class="review-other">
+        {% if active %}
+        <form method="post" action="/responder/zones/{{ z.id }}" class="inline merge">
+          <input type="hidden" name="action" value="merge">
+          <select name="target" required aria-label="Zone to merge into">
+            <option value="">Same as an existing zone…</option>
+            {% for a in active %}<option value="{{ a.id }}">{{ a.name }}</option>{% endfor %}
+          </select>
+          <button class="secondary">Merge</button>
+        </form>
+        {% endif %}
+        {% if not z.reports %}
+        <form method="post" action="/responder/zones/{{ z.id }}" class="inline">
+          <input type="hidden" name="action" value="reject">
+          <button class="secondary danger">Reject</button>
+        </form>
+        {% endif %}
+      </div>
+    </div>
+  </li>
+{% endfor %}
+</ul>
+{% endblock %}

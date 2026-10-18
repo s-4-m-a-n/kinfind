@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+{% import "_map_assets.html" as map_assets %}
+{% block head %}{{ map_assets.head() }}{% endblock %}
+{% block scripts %}{{ map_assets.scripts(zones) }}{% endblock %}
+{% block content %}
+<section class="hero">
+  <p class="eyebrow">For families after a flood, earthquake or landslide</p>
+  <h1>Looking for someone after a disaster?</h1>
+  <p>Describe the person you are looking for, especially tattoos, scars and birthmarks. We compare your
+    description with people found and recorded by responders in the same disaster area.</p>
+  <div class="actions">
+    <a class="button large" href="/missing/new">Report a missing person</a>
+    <span class="hint">Free · about 5 minutes · no account needed</span>
+  </div>
+</section>
+
+<section id="zones" class="zones" aria-labelledby="zones-title">
+  <div class="row-between">
+    <h2 id="zones-title">Affected zones <span class="count">{{ zones|length }}</span></h2>
+    <button type="button" class="secondary near-me" data-near-me hidden>
+      <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M12 2v3m0 14v3M2 12h3m14 0h3"/><circle cx="12" cy="12" r="6" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="12" cy="12" r="2" fill="currentColor"/></svg>
+      Zones near me
+    </button>
+  </div>
+  <p class="hint">Choose the area where the person was last seen. Your report is matched only with people found in that zone.</p>
+  <p class="near-status" data-near-status aria-live="polite" hidden></p>
+  <div id="zone-map" class="map" data-mode="browse" data-responder="{{ 1 if is_responder else 0 }}"
+       role="region" aria-label="World map of disaster-affected zones">
+    <p class="map-fallback">The map could not load. Choose a zone from the list below.</p>
+  </div>
+  {% if zones %}
+  <ul class="zone-list">
+    {% for z in zones %}
+    <li data-zone-id="{{ z.id }}">
+      <span class="zone-dot" aria-hidden="true"></span>
+      <div class="zone-name">
+        <strong>{{ z.name }}</strong>
+        <small>{{ z.region }}{% if z.lat is none %} · not on the map yet{% endif %}<span class="zone-distance"></span></small>
+      </div>
+      <div class="zone-actions">
+        {% if z.lat is not none %}<button type="button" class="link" data-show-zone="{{ z.id }}">Show on map</button>{% endif %}
+        <a class="button small" href="/missing/new?disaster={{ z.id }}">Report missing</a>
+        {% if is_responder %}<a class="button small secondary" href="/responder/found/new?disaster={{ z.id }}">Log found</a>{% endif %}
+      </div>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="empty">No disaster zones are open yet. Responders add a zone when they start recording people in an area.</p>
+  {% endif %}
+  <p class="suggest-zone">Can't find your area? <a href="/zones/new">Suggest a new disaster zone →</a>
+    {% if is_responder %}· <a href="/responder/zones">Review suggested zones</a>{% endif %}</p>
+</section>
+
+<ol class="how">
+  <li><span class="step">1</span><h3>Describe</h3><p>Add a description, distinctive features and photos. Photos are only seen by verified responders.</p></li>
+  <li><span class="step">2</span><h3>Match</h3><p>We suggest possible matches and show where and when that person was found.</p></li>
+  <li><span class="step">3</span><h3>Verify</h3><p>Ask for verification. A responder checks the record and contacts you directly.</p></li>
+</ol>
+
+<section class="privacy">
+  <h2>Your information stays protected</h2>
+  <div class="two-col">
+    <div>
+      <h3>You will see</h3>
+      <ul class="checks">
+        <li>Where and when a possible match was found</li>
+        <li>How closely they match, and why</li>
+        <li>The status of your verification request</li>
+      </ul>
+    </div>
+    <div>
+      <h3>Only responders see</h3>
+      <ul class="checks lock">
+        <li>Photos, from families and from responders</li>
+        <li>Your contact details</li>
+        <li>Where the person is now and their condition</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<p class="note">A suggested match is not an identification. Only a responder can confirm a match.
+  Already filed a report? Open the private link you were given.</p>
+
+<p class="responder-cta">Work for a rescue team, hospital or authority? <a href="/responder/login">Responder sign in →</a></p>
+{% endblock %}

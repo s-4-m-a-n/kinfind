@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}Graphic content warning · {{ app_name }}{% endblock %}
+{% block content %}
+<div class="graphic-warning">
+  <p class="eyebrow">Graphic content warning</p>
+  <h1>You are about to see unfiltered photos</h1>
+  <p>{{ 'This photo is' if pid else 'Photos of deceased people will be' }} shown exactly as taken. {{ 'It' if pid else 'They' }} may show
+    injuries, blood or a body after a disaster.</p>
+  <div class="actions">
+    {% if pid %}
+      <a class="button danger-solid" href="/responder/photos/{{ pid }}?view=original&amp;confirm=1">Show unfiltered photo</a>
+    {% else %}
+      <form method="post" action="/responder/photo-view" class="inline">
+        <input type="hidden" name="view" value="original"><input type="hidden" name="confirm" value="1">
+        <input type="hidden" name="next" value="{{ next }}">
+        <button class="danger-solid">Show unfiltered photos</button>
+      </form>
+    {% endif %}
+    <a class="button secondary" href="{{ next or 'javascript:history.back()' }}">Go back</a>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>{% block title %}{{ app_name }}{% endblock %}</title>
+  {% block head %}{% endblock %}
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  {% set path = request.url.path %}
+  <a class="skip" href="#main">Skip to content</a>
+  <header class="top">
+    <a class="brand" href="{{ '/responder' if is_responder else '/' }}">
+      <svg class="brand-mark" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5" fill="none" stroke="currentColor" stroke-width="2.2"/><path d="M15.5 15.5 21 21" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/><path d="M10.5 13.6s-3-1.8-3-3.6a1.6 1.6 0 0 1 3-.8 1.6 1.6 0 0 1 3 .8c0 1.8-3 3.6-3 3.6z" fill="currentColor"/></svg>
+      {{ app_name }}
+      {% if is_responder %}<span class="badge">Responder</span>{% endif %}
+    </a>
+    <nav aria-label="Main">
+      {% if is_responder %}
+        <a href="/responder" {% if path == '/responder' %}aria-current="page"{% endif %}>Dashboard</a>
+        <a href="/responder/found/new" {% if path == '/responder/found/new' %}aria-current="page"{% endif %}>Log found person</a>
+        <a href="/responder/zones" {% if path == '/responder/zones' %}aria-current="page"{% endif %}>Zones</a>
+        <form method="post" action="/responder/logout"><button class="link">Sign out</button></form>
+      {% else %}
+        <a href="/missing/new" {% if path == '/missing/new' %}aria-current="page"{% endif %}>Report missing</a>
+        <a href="/responder/login" {% if path == '/responder/login' %}aria-current="page"{% endif %}>Responders</a>
+      {% endif %}
+    </nav>
+  </header>
+  <main id="main">{% block content %}{% endblock %}</main>
+  <footer class="foot">
+    <p>{{ app_name }} suggests possible matches only. Identification is always confirmed by a responder.</p>
+  </footer>
+  {% if is_responder %}
+  <dialog id="graphic-dialog" class="graphic-dialog" aria-labelledby="graphic-title">
+    <p class="eyebrow">Graphic content warning</p>
+    <h2 id="graphic-title">You are about to see unfiltered photos</h2>
+    <p data-graphic-text></p>
+    <form method="dialog" class="actions">
+      <button value="ok" class="danger-solid">Show unfiltered</button>
+      <button value="cancel" class="secondary" autofocus>Cancel</button>
+    </form>
+  </dialog>
+  <script>
+    // Warn before showing unfiltered photos of the deceased. Without JS, the server shows a warning page instead.
+    function confirmGraphic(text, onOk) {
+      const dlg = document.getElementById("graphic-dialog");
+      if (!dlg.showModal) return onOk();  // very old browsers: the server-side warning still applies to links
+      dlg.querySelector("[data-graphic-text]").textContent = text;
+      dlg.returnValue = "";
+      dlg.addEventListener("close", () => dlg.returnValue === "ok" && onOk(), { once: true });
+      dlg.showModal();
+    }
+    document.addEventListener("click", (e) => {
+      const a = e.target.closest("a[data-graphic]");
+      if (!a) return;
+      e.preventDefault();
+      confirmGraphic("This photo is shown exactly as taken. It may show injuries, blood or a body after a disaster.",
+        () => window.open(a.href + "&confirm=1", "_blank", "noopener"));
+    });
+    document.addEventListener("submit", (e) => {
+      const form = e.target;
+      if (!form.matches("[data-graphic-form]") || e.submitter?.value !== "original" || form.dataset.confirmed) return;
+      e.preventDefault();
+      confirmGraphic("Photos of deceased people will be shown exactly as taken, on every record, until you switch back. " +
+                     "They may show injuries, blood or bodies after a disaster.", () => {
+        for (const [name, value] of [["view", "original"], ["confirm", "1"]]) {
+          const input = Object.assign(document.createElement("input"), { type: "hidden", name, value });
+          form.append(input);
+        }
+        form.dataset.confirmed = "1";
+        form.submit();
+      });
+    });
+  </script>
+  {% endif %}
+  <script>
+
+    const MAX_PHOTO = 8 * 1024 * 1024;
+    const PHOTO_TYPES = ["image/jpeg", "image/png", "image/webp"];
+    const photoProblem = (f) => !PHOTO_TYPES.includes(f.type) ? `“${f.name}” is not a JPEG, PNG or WebP image.`
+      : f.size > MAX_PHOTO ? `“${f.name}” is larger than 8 MB.` : "";
+
+    function showError(row, msg) {
+      const el = row.querySelector(".field-error");
+      el.textContent = msg; el.hidden = !msg;
+    }
+
+    // One photo per distinctive feature: preview it inside the picker tile.
+    function setFeaturePhoto(input) {
+      const row = input.closest(".feature-row"), tile = input.closest(".photo-pick");
+      const file = input.files[0], problem = file && photoProblem(file);
+      if (problem) input.value = "";
+      showError(row, problem || "");
+      const ok = file && !problem;
+      tile.classList.toggle("has-photo", !!ok);
+      tile.style.backgroundImage = ok ? `url(${URL.createObjectURL(file)})` : "";
+      row.querySelector("[data-clear-photo]").hidden = !ok;
+    }
+
+    // General photos: thumbnails, each removable.
+    function renderPhotoList(input) {
+      const box = document.getElementById(input.dataset.photoList);
+      const keep = new DataTransfer(), problems = [];
+      for (const f of input.files) { const p = photoProblem(f); p ? problems.push(p) : keep.items.add(f); }
+      input.files = keep.files;
+      box.replaceChildren(...[...input.files].map((f, i) => {
+        const fig = document.createElement("figure");
+        fig.innerHTML = `<img alt=""><button type="button" class="photo-clear">×</button>`;
+        fig.querySelector("img").src = URL.createObjectURL(f);
+        fig.querySelector("button").setAttribute("aria-label", `Remove ${f.name}`);
+        fig.querySelector("button").onclick = () => {
+          const dt = new DataTransfer();
+          [...input.files].forEach((g, j) => j !== i && dt.items.add(g));
+          input.files = dt.files; renderPhotoList(input);
+        };
+        return fig;
+      }));
+      const err = box.nextElementSibling;
+      err.textContent = problems.join(" "); err.hidden = !problems.length;
+    }
+
+    document.addEventListener("change", (e) => {
+      if (e.target.matches("[data-photo-input]")) setFeaturePhoto(e.target);
+      if (e.target.matches("[data-photo-list]")) renderPhotoList(e.target);
+    });
+
+    document.addEventListener("click", (e) => {
+      const t = e.target.closest("button");
+      if (!t) return;
+      if (t.matches("[data-add-feature]")) {
+        const list = document.getElementById("features");
+        list.appendChild(document.getElementById("feature-row").content.cloneNode(true));
+        list.lastElementChild.querySelector("select").focus();
+      } else if (t.matches("[data-remove-feature]")) {
+        const row = t.closest(".feature-row"), list = row.parentElement;
+        if (list.children.length > 1) return row.remove();
+        row.replaceWith(document.getElementById("feature-row").content.cloneNode(true));  // keep one blank row
+      } else if (t.matches("[data-clear-photo]")) {
+        const input = t.closest(".feature-row").querySelector("[data-photo-input]");
+        input.value = ""; setFeaturePhoto(input);
+      } else if (t.matches("[data-copy]")) {
+        const field = document.getElementById(t.dataset.copy);
+        navigator.clipboard?.writeText(field.value).then(() => {
+          t.textContent = "Copied ✓"; setTimeout(() => (t.textContent = "Copy link"), 2000);
+        }, () => field.select());
+      }
+    });
+
+    // Prevent double submits while large photos upload.
+    document.addEventListener("submit", (e) => {
+      const btn = e.target.querySelector("[data-busy]");
+      if (!btn) return;
+      btn.dataset.label = btn.textContent;
+      btn.disabled = true; btn.textContent = btn.dataset.busy;
+    });
+    // Restore the button if the user comes back with the browser's Back button.
+    window.addEventListener("pageshow", () => document.querySelectorAll("[data-busy]").forEach((b) => {
+      b.disabled = false; if (b.dataset.label) b.textContent = b.dataset.label;
+    }));
+  </script>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

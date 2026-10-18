@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% block title %}Report a missing person · {{ app_name }}{% endblock %}
+{% block content %}
+<header class="page-head">
+  <h1>Report a missing person</h1>
+  <p class="lede">Share as much as you know and leave anything you are unsure about blank. It takes about 5 minutes.
+    Fields marked <span class="req" aria-hidden="true">*</span> are required.</p>
+</header>
+
+{% if proposed %}
+<div class="notice" role="status">
+  <strong>Thank you. Your zone has been sent to responders for review.</strong>
+  <span>You can file your report now. It is matched with people found in this zone once responders start recording there.</span>
+</div>
+{% endif %}
+
+<form method="post" action="/missing" enctype="multipart/form-data" class="stack">
+  <fieldset>
+    <legend><span class="step">1</span>Disaster</legend>
+    <label><span>Which disaster or area? <span class="req" aria-hidden="true">*</span></span>
+      <select name="disaster_id" required>
+        <option value="">Choose…</option>
+        {% for d in disasters %}<option value="{{ d.id }}" {% if d.id == selected %}selected{% endif %}>{{ d.name }} — {{ d.region }}{% if d.status == 'pending' %} (awaiting review){% endif %}</option>{% endfor %}
+      </select>
+    </label>
+    <p class="hint">Not listed? <a href="/zones/new">Suggest a new disaster zone</a>.</p>
+  </fieldset>
+
+  <fieldset>
+    <legend><span class="step">2</span>The missing person</legend>
+    <label><span>Full name <span class="req" aria-hidden="true">*</span></span> <input name="full_name" required autocomplete="off"></label>
+    <div class="grid">
+      <label>Sex
+        <select name="sex"><option value="unknown">Prefer not to say</option><option value="female">Female</option><option value="male">Male</option></select>
+      </label>
+      <label>Age <input name="age" type="number" min="0" max="120" inputmode="numeric"></label>
+      <label>Height (cm) <input name="height_cm" type="number" min="40" max="250" inputmode="numeric"></label>
+      <label>Hair colour
+        <select name="hair_color"><option value="">Unknown</option>{% for h in hair_colors %}<option value="{{ h }}">{{ h|capitalize }}</option>{% endfor %}</select>
+      </label>
+    </div>
+    <div class="grid">
+      <label>Last seen at <input name="last_seen_place" placeholder="Village, street, landmark"></label>
+      <label>Last seen on <input name="last_seen_date" type="date"></label>
+    </div>
+    <label>Clothing &amp; belongings when last seen
+      <textarea name="clothing" rows="2" placeholder="e.g. red kurta, black jeans, silver bangle on right wrist"></textarea></label>
+    <label>Other description
+      <textarea name="description" rows="3" placeholder="Build, face, glasses, medical conditions…"></textarea></label>
+  </fieldset>
+
+  {% with step=3, photo_note="only verified responders can see it" %}{% include "_features.html" %}{% endwith %}
+
+  <fieldset>
+    <legend><span class="step">4</span>Photos of the person</legend>
+    <p class="hint">Clear, recent photos of their face. Only verified responders can see photos — never other families.</p>
+    {% include "_photo_list.html" %}
+  </fieldset>
+
+  <fieldset>
+    <legend><span class="step">5</span>Your details</legend>
+    <p class="hint">Kept private. A responder uses this to contact you about a possible match.</p>
+    <div class="grid">
+      <label><span>Your name <span class="req" aria-hidden="true">*</span></span> <input name="reporter_name" required autocomplete="name"></label>
+      <label><span>Phone or email <span class="req" aria-hidden="true">*</span></span> <input name="reporter_contact" required autocomplete="tel"></label>
+    </div>
+  </fieldset>
+
+  <div class="submit-bar">
+    <p class="hint">You'll get a private link to check for matches at any time.</p>
+    <button type="submit" data-busy="Uploading and searching…">Submit and search for matches</button>
+  </div>
+</form>
+{% endblock %}

@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% block title %}Responder dashboard · {{ app_name }}{% endblock %}
+{% block content %}
+<div class="row-between">
+  <h1>Responder dashboard</h1>
+  <div class="actions">
+    <a class="button secondary" href="/responder/disasters/new">+ Add disaster zone</a>
+    <a class="button" href="/responder/found/new">+ Log found person</a>
+  </div>
+</div>
+
+{% set open_count = queue|selectattr('status', 'equalto', 'open')|list|length %}
+<div class="stats">
+  <div class="{{ 'attention' if open_count }}"><strong>{{ open_count }}</strong><span>open verification request{{ '' if open_count == 1 else 's' }}</span></div>
+  <div><strong>{{ found|length }}{{ '+' if found|length == 50 }}</strong><span>found records</span></div>
+  <div><strong>{{ missing|length }}{{ '+' if missing|length == 50 }}</strong><span>missing reports</span></div>
+  <a href="/responder/zones" class="{{ 'attention' if pending_zones }}"><strong>{{ pending_zones }}</strong><span>zone{{ '' if pending_zones == 1 else 's' }} awaiting review →</span></a>
+</div>
+
+{% if ai_flags %}
+<h2>Flagged by the AI photo check</h2>
+<ul class="matches">
+{% for a in ai_flags %}
+  <li class="match ai-flag verdict-{{ a.verdict }}">
+    <div class="score {{ 'high' if a.verdict == 'strong' else 'mid' }}"><span class="score-num">{{ a.score if a.score is not none else a.shortlist_score }}%</span>
+      <span class="score-label">{{ {'strong': 'Strong', 'possible': 'Possible'}.get(a.verdict, 'Description') }}</span></div>
+    <div class="body">
+      <h3><a href="/responder/missing/{{ a.missing_ref }}">{{ a.full_name }}</a> ↔ <a href="/responder/found/{{ a.found_ref }}#ai">{{ a.found_ref }}</a> <small>{{ a.status }}</small></h3>
+      <p class="meta">{{ a.summary or a.shortlist_reason }}</p>
+    </div>
+  </li>
+{% endfor %}
+</ul>
+{% endif %}
+
+<h2>Verification requests</h2>
+{% if not queue %}
+  <p class="empty">No requests yet. Families request verification from their case page.</p>
+{% else %}
+<div class="table-wrap"><table>
+  <thead><tr><th>Score</th><th>Missing</th><th>Found</th><th>Family contact</th><th>Status</th></tr></thead>
+  <tbody>
+  {% for v in queue %}
+    <tr class="{{ 'muted' if v.status in ('rejected', 'confirmed') }}">
+      <td><strong class="score-num {{ 'high' if v.score >= 70 else 'mid' }}">{{ v.score }}%</strong></td>
+      <td><a href="/responder/missing/{{ v.missing_ref }}">{{ v.full_name }}</a><br><small>{{ v.missing_ref }}</small></td>
+      <td><a href="/responder/found/{{ v.found_ref }}">{{ v.found_ref }}</a> · {{ v.found_status }}<br>
+        <small>{{ v.found_place }}{% if v.facility %} → {{ v.facility }}{% endif %}</small></td>
+      <td>{{ v.reporter_name }}<br><small>{{ v.reporter_contact }}</small></td>
+      <td>
+        <form method="post" action="/responder/verifications/{{ v.id }}" class="inline">
+          <select name="status" class="status-{{ v.status }}" onchange="this.form.submit()" aria-label="Status for {{ v.full_name }}">
+            {% for s in ['open', 'contacted', 'confirmed', 'rejected'] %}
+              <option value="{{ s }}" {% if s == v.status %}selected{% endif %}>{{ s|capitalize }}</option>
+            {% endfor %}
+          </select>
+          <noscript><button>Save</button></noscript>
+        </form>
+      </td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table></div>
+{% endif %}
+
+<div class="two-col">
+  <section>
+    <h2>Found records</h2>
+    <ul class="plain">
+    {% for f in found %}
+      <li><a href="/responder/found/{{ f.ref }}">{{ f.ref }}</a> · {{ f.status }} · {{ f.found_place }} <small>({{ f.disaster }})</small></li>
+    {% else %}<li class="empty">None yet.</li>{% endfor %}
+    </ul>
+  </section>
+  <section>
+    <h2>Missing reports</h2>
+    <ul class="plain">
+    {% for m in missing %}
+      <li><a href="/responder/missing/{{ m.ref }}">{{ m.full_name }}</a> · {{ m.ref }} <small>({{ m.disaster }})</small></li>
+    {% else %}<li class="empty">None yet.</li>{% endfor %}
+    </ul>
+  </section>
+</div>
+{% endblock %}
