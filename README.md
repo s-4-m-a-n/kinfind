@@ -29,6 +29,17 @@ Data is stored in `data/` (SQLite database + uploaded photos). Set `DISASTERLENS
 python -m pytest -q
 ```
 
+## Public appeals and community sightings
+
+A family can publish a **public appeal** from their private case page: a "Have you seen…?" page at `/appeal/<ref>` showing the name, description, last-seen details, distinctive marks and one photo they choose. It never shows their contact details or private link, and they can take it down at any time. All public appeals are listed at `/appeals` and on the home page.
+
+Anyone can send a **sighting** from an appeal: where and when (with an optional map pin), how the person seemed, a message, up to 4 photos, and an optional contact.
+
+- **The family** sees tips on their case page straight away, marked *Unverified*, with photos blurred until they choose to show them. They can hide any tip.
+- **Responders** see every tip, including the tipster's contact, on the missing-person record and the dashboard. They can mark a tip as checked or hide it from the family.
+- **Tipsters** never see the family's details, and tips are never shown publicly.
+- **Abuse protection:** a hidden honeypot field for bots, and at most 5 tips per IP address every 10 minutes (kept in memory, so it resets when the server restarts).
+
 ## How matching works
 
 All of the matching code is in [app/matching.py](app/matching.py). It is made of pure functions, so it is easy to tune and test.
@@ -83,7 +94,7 @@ This is a prototype. Before deploying it:
 
 - Give each responder their own account and keep an audit log, instead of one shared key.
 - Use HTTPS, encrypt photos at rest, and remove EXIF data from uploads.
-- Add rate limits on report creation and zone suggestions, so people can't keep filing reports to probe found records.
+- Move the tip rate limit to shared storage, and add rate limits on report creation and zone suggestions, so people can't keep filing reports to probe found records.
 - Write a data-retention policy. Check consent and legal requirements in each region.
 - Use a map tile provider that allows production traffic. The public OpenStreetMap tile servers are only for light use, and each map load sends the visitor's IP address to them.
 - Before sending real photos to an AI provider, check its data-retention terms and get consent and legal approval. Photos of the deceased are especially sensitive.

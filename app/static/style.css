@@ -368,3 +368,48 @@ button.danger-solid, .button.danger-solid { background: var(--error); color: #ff
 .graphic-dialog::backdrop { background: rgb(0 0 0 / .6); }
 .graphic-dialog h2 { margin: 0 0 .5rem; }
 .graphic-dialog .actions { margin-top: 1rem; }
+
+/* public appeals */
+.poster { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 1.25rem 1.4rem; box-shadow: var(--shadow); }
+.poster h1 { font-size: clamp(1.6rem, 5vw, 2.2rem); }
+.poster-body { display: grid; grid-template-columns: minmax(0, 260px) 1fr; gap: 1.25rem; align-items: start; margin-top: .75rem; }
+@media (max-width: 640px) { .poster-body { grid-template-columns: 1fr; } }
+.poster-photo { width: 100%; border-radius: 10px; border: 1px solid var(--line); object-fit: cover; aspect-ratio: 3 / 4; }
+.poster .facts { border: 0; padding: 0; background: none; }
+.poster-ref { font-size: .8rem; color: var(--muted); margin: 1rem 0 0; }
+.appeal-cards { list-style: none; padding: 0; margin: 0; display: grid; gap: .75rem; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); }
+.appeal-cards a { display: grid; gap: .2rem; text-decoration: none; color: var(--text); background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: .6rem; height: 100%; }
+.appeal-cards a:hover { border-color: var(--accent); }
+.appeal-cards img, .appeal-cards .no-photo { width: 100%; aspect-ratio: 3 / 4; object-fit: cover; border-radius: 8px; margin-bottom: .3rem; }
+.appeal-cards .no-photo { display: grid; place-items: center; background: var(--accent-soft); color: var(--accent); font-size: 2.5rem; font-weight: 700; }
+.appeal-cards small { color: var(--muted); font-size: .8rem; }
+.appeals-home { margin: 1.5rem 0; }
+.filter { margin-bottom: 1rem; max-width: 20rem; }
+.hp { position: absolute; left: -9999px; }
+
+/* family: appeal settings */
+.appeal-settings .copy-row { flex-wrap: wrap; }
+.appeal-settings .copy-row input { flex: 1; min-width: 12rem; }
+.photo-choice .choices { display: flex; flex-wrap: wrap; gap: .6rem; }
+.photo-option { position: relative; display: block; cursor: pointer; }
+.photo-option input { position: absolute; top: .4rem; left: .4rem; width: auto; min-height: 0; }
+.photo-option img, .photo-option.none span { width: 96px; height: 96px; object-fit: cover; border-radius: 8px; border: 2px solid var(--line); display: grid; place-items: center; font-size: .8rem; color: var(--muted); }
+.photo-option input:checked + img, .photo-option input:checked + span { border-color: var(--accent); }
+
+/* community tips */
+.tips { list-style: none; padding: 0; margin: 0; display: grid; gap: .75rem; }
+.tip { background: var(--surface); border: 1px solid var(--line); border-left: 4px solid var(--mid); border-radius: var(--radius); padding: .9rem 1.1rem; display: grid; gap: .45rem; }
+.tip-verified { border-left-color: var(--high); }
+.tip-hidden { border-left-color: var(--line); opacity: .65; }
+.tip p { margin: 0; }
+.tip-head { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+.pill.unverified { color: var(--mid); border-color: var(--mid); background: var(--mid-soft); }
+.tip-message { white-space: pre-line; }
+.tip-photos { display: flex; gap: .6rem; flex-wrap: wrap; }
+.tip-photo { position: relative; margin: 0; width: 140px; height: 140px; border-radius: 8px; overflow: hidden; border: 1px solid var(--line); }
+.tip-photo img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.tip-photo.blurred img { filter: blur(18px) grayscale(.6); transform: scale(1.15); }
+.tip-photo.blurred a { pointer-events: none; }
+.tip-photo .reveal { position: absolute; inset: 0; display: grid; place-content: center; gap: .2rem; background: rgb(0 0 0 / .45); color: #fff; font-size: .85rem; border-radius: 0; padding: .5rem; }
+.tip-photo .reveal small { font-weight: 400; font-size: .7rem; opacity: .9; }
+.tip-actions { display: flex; gap: .5rem; flex-wrap: wrap; }

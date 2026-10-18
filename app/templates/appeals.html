@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}Have you seen them? · {{ app_name }}{% endblock %}
+{% block content %}
+<header class="page-head">
+  <h1>Have you seen them?</h1>
+  <p class="lede">Families have shared these appeals for people missing after a disaster. If you've seen someone,
+    open their appeal and send what you know. It goes to the family and to responders.</p>
+</header>
+
+{% if zones|length > 1 %}
+<form method="get" action="/appeals" class="filter">
+  <label>Disaster
+    <select name="disaster" onchange="this.form.submit()">
+      <option value="0">All disasters</option>
+      {% for z in zones %}<option value="{{ z.id }}" {% if z.id == selected %}selected{% endif %}>{{ z.name }}</option>{% endfor %}
+    </select>
+  </label>
+  <noscript><button>Show</button></noscript>
+</form>
+{% endif %}
+
+{% include "_appeal_cards.html" %}
+{% endblock %}

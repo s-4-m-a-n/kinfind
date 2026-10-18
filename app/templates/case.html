@@ -1,4 +1,6 @@
 {% extends "base.html" %}
+{% import "_tip.html" as tipui with context %}
+{% macro tip_photo_url(pid) %}/case/{{ case.ref }}/tips/photos/{{ pid }}?k={{ k }}{% endmacro %}
 {% block title %}Case {{ case.ref }} · {{ app_name }}{% endblock %}
 {% block content %}
 {% set link = request.url.include_query_params(k=k).remove_query_params('new') %}
@@ -22,6 +24,63 @@
     <li>{{ photos }} photo{{ '' if photos == 1 else 's' }} on file</li>
   </ul>
 </header>
+
+<section id="appeal" class="appeal-settings">
+  <h2>Public appeal</h2>
+  {% if appeal_public %}
+    {% set appeal_url = request.base_url ~ 'appeal/' ~ case.ref %}
+    <p><span class="pill strong">Shared publicly</span> Anyone can see {{ case.full_name }}'s appeal and send a sighting.
+      Tips appear below.</p>
+    <div class="copy-row">
+      <input id="appeal-link" class="copy" readonly value="{{ appeal_url }}" onclick="this.select()" aria-label="Public appeal link">
+      <button type="button" class="secondary" data-copy="appeal-link">Copy link</button>
+      <a class="button secondary" href="/appeal/{{ case.ref }}" target="_blank">View ↗</a>
+    </div>
+    <p class="hint">Share this link on social media or in community groups. It doesn't show your contact details,
+      and it can't be used to open this private page.</p>
+  {% else %}
+    <p>Publish a "Have you seen…?" page so people in the area can send sightings. It shows {{ case.full_name }}'s name,
+      description, last-seen details and one photo you choose. It never shows your contact details or this private page.</p>
+  {% endif %}
+  <form method="post" action="/case/{{ case.ref }}/appeal" class="stack appeal-form">
+    <input type="hidden" name="k" value="{{ k }}">
+    {% if own_photos %}
+    <fieldset class="photo-choice">
+      <legend>Photo shown publicly</legend>
+      <div class="choices">
+        {% for pid in own_photos %}
+        <label class="photo-option"><input type="radio" name="photo_id" value="{{ pid }}" {% if pid == appeal_photo_id or (not appeal_photo_id and loop.first) %}checked{% endif %}>
+          <img src="/case/{{ case.ref }}/photos/{{ pid }}?k={{ k }}" alt="Your photo {{ loop.index }}"></label>
+        {% endfor %}
+        <label class="photo-option none"><input type="radio" name="photo_id" value="" {% if appeal_public and not appeal_photo_id %}checked{% endif %}><span>No photo</span></label>
+      </div>
+    </fieldset>
+    {% endif %}
+    <div class="actions">
+      {% if appeal_public %}
+        <button name="publish" value="1" class="secondary">Save photo choice</button>
+        <button name="publish" value="0" class="secondary danger">Stop sharing publicly</button>
+      {% else %}
+        <button name="publish" value="1">Publish public appeal</button>
+      {% endif %}
+    </div>
+  </form>
+</section>
+
+{% if appeal_public or tips %}
+<section id="tips">
+  <h2>Sightings from the community {% if tips %}<span class="count">{{ tips|length }}</span>{% endif %}</h2>
+  {% if tips %}
+  <p class="hint">These come from members of the public and are <strong>not checked</strong> unless marked "Checked by a responder".
+    Responders see every tip too. Never send money to anyone claiming to have information.</p>
+  <ul class="tips">
+    {% for t in tips %}{{ tipui.tip_card(t, tip_photo_url, family_form="/case/" ~ case.ref ~ "/tips/" ~ t.id ~ "/hide") }}{% endfor %}
+  </ul>
+  {% else %}
+  <p class="empty">No sightings yet. Share the appeal link so more people see it.</p>
+  {% endif %}
+</section>
+{% endif %}
 
 <h2>Possible matches {% if matches %}<span class="count">{{ matches|length }}</span>{% endif %}</h2>
 {% if not matches %}

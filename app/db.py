@@ -38,6 +38,9 @@ CREATE TABLE IF NOT EXISTS missing_reports (
     last_seen_place TEXT, last_seen_date TEXT,
     clothing TEXT, description TEXT,
     reporter_name TEXT NOT NULL, reporter_contact TEXT NOT NULL,
+    -- Public appeal: the family chooses to publish a "have you seen this person?" page.
+    appeal_public INTEGER NOT NULL DEFAULT 0,
+    appeal_photo_id INTEGER REFERENCES photos(id),  -- the one photo shown publicly
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -87,6 +90,28 @@ CREATE TABLE IF NOT EXISTS ai_matches (
     UNIQUE (missing_id, found_id)
 );
 
+-- Sightings and tips from the community on a public appeal. Families see them straight
+-- away, marked unverified; responders can verify or hide them. The tipster's contact
+-- is shown to responders only.
+CREATE TABLE IF NOT EXISTS tips (
+    id INTEGER PRIMARY KEY,
+    missing_id INTEGER NOT NULL REFERENCES missing_reports(id),
+    seen_place TEXT, seen_lat REAL, seen_lng REAL, seen_at TEXT,
+    condition TEXT CHECK (condition IN ('well', 'needs_help', 'unsure')),
+    message TEXT NOT NULL,
+    contact TEXT,
+    status TEXT NOT NULL DEFAULT 'unverified' CHECK (status IN ('unverified', 'verified', 'hidden')),
+    hidden_by TEXT,  -- 'family' or 'responder'
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS tips_missing ON tips(missing_id);
+
+CREATE TABLE IF NOT EXISTS tip_photos (
+    id INTEGER PRIMARY KEY,
+    tip_id INTEGER NOT NULL REFERENCES tips(id),
+    filename TEXT NOT NULL
+);
+
 -- A family asking responders to check a suggested match. Responders contact
 -- the family; families never get facility or contact details directly.
 CREATE TABLE IF NOT EXISTS verification_requests (
@@ -116,6 +141,8 @@ MIGRATIONS = [
     ("disasters", "note", "TEXT"),
     ("disasters", "created_at", "TEXT"),
     ("features", "ai_description", "TEXT"),
+    ("missing_reports", "appeal_public", "INTEGER NOT NULL DEFAULT 0"),
+    ("missing_reports", "appeal_photo_id", "INTEGER"),
     ("ai_matches", "stage", "TEXT"),
     ("ai_matches", "shortlist_score", "INTEGER"),
     ("ai_matches", "shortlist_reason", "TEXT"),

@@ -1,5 +1,7 @@
 {% extends "base.html" %}
 {% import "_photo.html" as ph with context %}
+{% import "_tip.html" as tipui with context %}
+{% macro tip_photo_url(pid) %}/responder/tips/photos/{{ pid }}{% endmacro %}
 {% block title %}{{ record.ref }} · {{ app_name }}{% endblock %}
 {% block content %}
 {% set r = record %}
@@ -75,6 +77,18 @@
 {% if photo_ids %}
 <h2>Photos</h2>
 <div class="photos">{% for pid in photo_ids %}{{ ph.photo(pid, "Photo " ~ loop.index, own_sensitive) }}{% endfor %}</div>
+{% endif %}
+
+{% if kind == 'missing' %}
+<section id="tips">
+  <h2>Community sightings {% if tips %}<span class="count">{{ tips|length }}</span>{% endif %}
+    {% if r.appeal_public %}<a class="pill" href="/appeal/{{ r.ref }}" target="_blank">Public appeal ↗</a>{% else %}<span class="pill">No public appeal</span>{% endif %}</h2>
+  {% if tips %}
+  <p class="hint">The family sees these straight away, marked unverified, except ones that are hidden. Hide anything abusive,
+    fake or a scam, and mark tips you've checked so the family knows.</p>
+  <ul class="tips">{% for t in tips %}{{ tipui.tip_card(t, tip_photo_url, responder=true) }}{% endfor %}</ul>
+  {% else %}<p class="empty">No sightings sent yet.</p>{% endif %}
+</section>
 {% endif %}
 
 {% if ai_enabled or ai_results %}

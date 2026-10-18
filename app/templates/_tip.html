@@ -1,0 +1,39 @@
+{# One community tip. `photo_url(pid)` builds the photo link for the viewer (family or responder);
+   `responder` shows the tipster's contact and moderation buttons. #}
+{% macro tip_card(t, photo_url, responder=false, family_form=none) -%}
+<li class="tip tip-{{ t.status }}">
+  <div class="tip-head">
+    {% if t.status == 'verified' %}<span class="pill strong">Checked by a responder</span>
+    {% elif t.status == 'hidden' %}<span class="pill">Hidden{{ ' by the family' if t.hidden_by == 'family' else '' }}</span>
+    {% else %}<span class="pill unverified">Unverified</span>{% endif %}
+    {% if t.condition %}<span class="pill">{{ tip_conditions[t.condition] }}</span>{% endif %}
+    <small>Sent {{ t.created_at[:16]|replace('T', ' ') }} UTC</small>
+  </div>
+  <p class="tip-seen"><strong>Seen{% if t.seen_place %} at {{ t.seen_place }}{% endif %}{% if t.seen_at %} on {{ t.seen_at|replace('T', ' at ') }}{% endif %}</strong>
+    {% if t.seen_lat is not none %}<a href="https://www.openstreetmap.org/?mlat={{ t.seen_lat }}&amp;mlon={{ t.seen_lng }}#map=15/{{ t.seen_lat }}/{{ t.seen_lng }}" target="_blank" rel="noopener">map pin ↗</a>{% endif %}</p>
+  <p class="tip-message">{{ t.message }}</p>
+  {% if t.photo_ids %}
+  <div class="tip-photos">
+    {% for pid in t.photo_ids %}
+    <figure class="tip-photo blurred">
+      <a href="{{ photo_url(pid) }}" target="_blank"><img src="{{ photo_url(pid) }}" alt="Photo sent with this tip" loading="lazy"></a>
+      <button type="button" class="reveal" data-reveal>Show photo<small>Sent by a member of the public. It may be distressing.</small></button>
+    </figure>
+    {% endfor %}
+  </div>
+  {% endif %}
+  {% if responder %}
+    <p class="meta">Tipster contact: {{ t.contact or 'not given' }}</p>
+    <div class="tip-actions">
+      {% if t.status != 'verified' %}<form method="post" action="/responder/tips/{{ t.id }}" class="inline"><button name="action" value="verify" class="secondary">Mark as checked</button></form>{% endif %}
+      {% if t.status != 'hidden' %}<form method="post" action="/responder/tips/{{ t.id }}" class="inline"><button name="action" value="hide" class="secondary danger">Hide from family</button></form>
+      {% else %}<form method="post" action="/responder/tips/{{ t.id }}" class="inline"><button name="action" value="unhide" class="secondary">Show to family again</button></form>{% endif %}
+    </div>
+  {% elif family_form %}
+    <form method="post" action="{{ family_form }}" class="inline tip-actions">
+      <input type="hidden" name="k" value="{{ k }}">
+      <button class="link">Hide this tip</button>
+    </form>
+  {% endif %}
+</li>
+{%- endmacro %}

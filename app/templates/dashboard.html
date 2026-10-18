@@ -33,6 +33,22 @@
 </ul>
 {% endif %}
 
+{% if new_tips %}
+<h2>New community sightings <span class="count">{{ new_tips|length }}</span></h2>
+<ul class="matches">
+{% for t in new_tips %}
+  <li class="match tip-row">
+    <div class="body">
+      <h3><a href="/responder/missing/{{ t.missing_ref }}#tips">{{ t.full_name }}</a> <small>{{ t.missing_ref }}</small></h3>
+      <p class="meta">Seen{% if t.seen_place %} at {{ t.seen_place }}{% endif %}{% if t.seen_at %} on {{ t.seen_at|replace('T', ' at ') }}{% endif %}
+        {% if t.condition %}· {{ tip_conditions[t.condition] }}{% endif %}{% if t.photos %} · {{ t.photos }} photo{{ '' if t.photos == 1 else 's' }}{% endif %}</p>
+      <p class="tip-message">{{ t.message|truncate(180) }}</p>
+    </div>
+  </li>
+{% endfor %}
+</ul>
+{% endif %}
+
 <h2>Verification requests</h2>
 {% if not queue %}
   <p class="empty">No requests yet. Families request verification from their case page.</p>

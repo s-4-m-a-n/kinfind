@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% import "_map_assets.html" as map_assets %}
+{% set p = person %}
+{% block title %}Have you seen {{ p.full_name }}? · {{ app_name }}{% endblock %}
+{% block head %}{{ map_assets.head() }}{% endblock %}
+{% block scripts %}{{ map_assets.scripts(zones) }}{% endblock %}
+{% block content %}
+{% if sent %}
+<div class="notice" role="status">
+  <strong>Thank you. Your sighting has been sent to {{ p.full_name }}'s family and to responders.</strong>
+  <span>If you think someone is in danger right now, contact local emergency services.</span>
+</div>
+{% endif %}
+
+<article class="poster">
+  <p class="eyebrow">Missing after {{ disaster.name }} · {{ disaster.region }}</p>
+  <h1>Have you seen {{ p.full_name }}?</h1>
+  <div class="poster-body">
+    {% if p.appeal_photo_id %}
+    <img class="poster-photo" src="/appeal/{{ p.ref }}/photo" alt="Photo of {{ p.full_name }}, chosen by their family">
+    {% endif %}
+    <dl class="facts">
+      {% if p.age %}<dt>Age</dt><dd>{{ p.age }}</dd>{% endif %}
+      {% if p.sex and p.sex != 'unknown' %}<dt>Sex</dt><dd>{{ p.sex|capitalize }}</dd>{% endif %}
+      {% if p.height_cm %}<dt>Height</dt><dd>{{ p.height_cm }} cm</dd>{% endif %}
+      {% if p.hair_color %}<dt>Hair</dt><dd>{{ p.hair_color|capitalize }}</dd>{% endif %}
+      {% if p.last_seen_place or p.last_seen_date %}<dt>Last seen</dt><dd>{{ p.last_seen_place or '' }}{% if p.last_seen_date %} on {{ p.last_seen_date }}{% endif %}</dd>{% endif %}
+      {% if p.clothing %}<dt>Wearing</dt><dd>{{ p.clothing }}</dd>{% endif %}
+      {% if p.description %}<dt>Description</dt><dd>{{ p.description }}</dd>{% endif %}
+      {% if p.features %}<dt>Marks</dt><dd>{% for f in p.features %}<div>{{ f.kind|capitalize }}{% if f.location != 'unknown' %} on {{ f.location }}{% endif %}{% if f.text %}: {{ f.text }}{% endif %}</div>{% endfor %}</dd>{% endif %}
+    </dl>
+  </div>
+  <p class="poster-ref">Appeal {{ p.ref }} · shared by the family on {{ app_name }}</p>
+</article>
+
+<h2 id="sighting">Send a sighting or information</h2>
+<p class="hint">Anything helps, even if you're not sure. What you send goes to the family and to responders.
+  Your contact details are only ever seen by responders.</p>
+
+<form method="post" action="/appeal/{{ p.ref }}/tips" enctype="multipart/form-data" class="stack">
+  <fieldset>
+    <legend><span class="step">1</span>Where and when</legend>
+    <div class="grid">
+      <label>Where did you see them? <input name="seen_place" placeholder="Village, street, shelter, landmark"></label>
+      <label>When? <input name="seen_at" type="datetime-local"></label>
+    </div>
+    {% if zones %}
+    <p class="hint">Optional: click the map to pin the spot.</p>
+    <div id="zone-map" class="map" data-mode="pick" data-fit="zones" role="region" aria-label="Map: click to pin where you saw them">
+      <p class="map-fallback">The map could not load. Describe the place above instead.</p>
+    </div>
+    <input type="hidden" name="lat"><input type="hidden" name="lng"><input type="hidden" name="radius_km" value="0.3">
+    {% endif %}
+  </fieldset>
+
+  <fieldset>
+    <legend><span class="step">2</span>What did you see?</legend>
+    <label>How did they seem?
+      <select name="condition"><option value="">Choose…</option>{% for value, label in tip_conditions.items() %}<option value="{{ value }}">{{ label }}</option>{% endfor %}</select>
+    </label>
+    <label><span>What happened, who were they with, where were they going? <span class="req" aria-hidden="true">*</span></span>
+      <textarea name="message" rows="4" required maxlength="2000"></textarea></label>
+    <div>
+      <p class="hint">Photos (optional, up to 4). Please don't send photos of anyone who is badly hurt.</p>
+      {% include "_photo_list.html" %}
+    </div>
+  </fieldset>
+
+  <fieldset>
+    <legend><span class="step">3</span>Your contact (optional)</legend>
+    <p class="hint">Only responders see this, so they can ask you more. It is never shown to the family or anyone else.</p>
+    <label>Phone or email <input name="contact" autocomplete="tel"></label>
+    <label class="hp" aria-hidden="true">Website <input name="website" tabindex="-1" autocomplete="off"></label>
+  </fieldset>
+
+  <div class="submit-bar">
+    <p class="hint">Never send money to anyone claiming to have information about a missing person.</p>
+    <button type="submit" data-busy="Sending…">Send sighting</button>
+  </div>
+</form>
+{% endblock %}

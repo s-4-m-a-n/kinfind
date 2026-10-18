@@ -52,6 +52,17 @@
     {% if is_responder %}· <a href="/responder/zones">Review suggested zones</a>{% endif %}</p>
 </section>
 
+{% if appeals %}
+<section class="appeals-home">
+  <div class="row-between">
+    <h2>Have you seen them?</h2>
+    <a href="/appeals">All appeals →</a>
+  </div>
+  <p class="hint">Families have shared these appeals. If you've seen someone, open their appeal and send what you know.</p>
+  {% include "_appeal_cards.html" %}
+</section>
+{% endif %}
+
 <ol class="how">
   <li><span class="step">1</span><h3>Describe</h3><p>Add a description, distinctive features and photos. Photos are only seen by verified responders.</p></li>
   <li><span class="step">2</span><h3>Match</h3><p>We suggest possible matches and show where and when that person was found.</p></li>

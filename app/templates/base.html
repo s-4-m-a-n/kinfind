@@ -25,6 +25,7 @@
         <form method="post" action="/responder/logout"><button class="link">Sign out</button></form>
       {% else %}
         <a href="/missing/new" {% if path == '/missing/new' %}aria-current="page"{% endif %}>Report missing</a>
+        <a href="/appeals" {% if path.startswith('/appeal') %}aria-current="page"{% endif %}>Have you seen them?</a>
         <a href="/responder/login" {% if path == '/responder/login' %}aria-current="page"{% endif %}>Responders</a>
       {% endif %}
     </nav>
@@ -130,6 +131,10 @@
     document.addEventListener("click", (e) => {
       const t = e.target.closest("button");
       if (!t) return;
+      if (t.matches("[data-reveal]")) {  // blurred tip photo: show it only when asked
+        t.closest(".blurred").classList.remove("blurred");
+        return t.remove();
+      }
       if (t.matches("[data-add-feature]")) {
         const list = document.getElementById("features");
         list.appendChild(document.getElementById("feature-row").content.cloneNode(true));

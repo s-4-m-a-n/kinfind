@@ -49,14 +49,22 @@
   for (const z of zones) {
     const mode = el.dataset.mode;
     const faint = mode === "pick" || (mode === "review" && z.status === "active");
+    // When picking a spot, existing zones are only a backdrop: clicks must reach the map.
+    const interactive = mode !== "pick";
     const area = L.circle([z.lat, z.lng], {
       radius: (z.radius_km || 25) * 1000, color: faint ? muted : color, weight: 1.5,
-      fillOpacity: faint ? 0.08 : 0.2,
+      fillOpacity: faint ? 0.08 : 0.2, interactive,
     });
     const pin = L.circleMarker([z.lat, z.lng], {
-      radius: 7, color: "#fff", weight: 2, fillColor: faint ? muted : color, fillOpacity: 1,
+      radius: 7, color: "#fff", weight: 2, fillColor: faint ? muted : color, fillOpacity: 1, interactive,
     });
-    layers[z.id] = L.featureGroup([area, pin]).bindPopup(() => popup(z)).addTo(map);
+    layers[z.id] = L.featureGroup([area, pin]).addTo(map);
+    if (interactive) layers[z.id].bindPopup(() => popup(z));
+  }
+
+  // Start zoomed in on the given zones (e.g. a public appeal's disaster) instead of the world.
+  if (el.dataset.fit === "zones" && zones.length) {
+    map.fitBounds(L.featureGroup(Object.values(layers)).getBounds(), { maxZoom: 10 });
   }
 
   // "Show on map" buttons in the zone list.
@@ -79,7 +87,7 @@
   function draw() {
     const ll = [parseFloat(lat.value), parseFloat(lng.value)], r = parseFloat(radius.value) * 1000;
     if (ll.some(isNaN) || !(r > 0)) return;
-    if (!draft) draft = L.circle(ll, { radius: r, color, weight: 2, fillOpacity: 0.25 }).addTo(map);
+    if (!draft) draft = L.circle(ll, { radius: r, color, weight: 2, fillOpacity: 0.25, interactive: false }).addTo(map);
     draft.setLatLng(ll).setRadius(r);
   }
   map.on("click", (e) => {

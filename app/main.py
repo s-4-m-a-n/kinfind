@@ -12,7 +12,9 @@ import hmac
 import io
 import logging
 import os
+import re
 import secrets
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -165,7 +167,8 @@ def parse_features(form) -> list[dict]:
     return out
 
 
-async def store_photo(conn, upload, owner_type: str, owner_id: int, feature_id: int | None = None) -> None:
+async def save_upload(upload) -> str:
+    """Check an uploaded photo and write it to the uploads folder. Returns its filename."""
     ext = PHOTO_TYPES.get(upload.content_type)
     if not ext:
         raise HTTPException(400, "Photos must be JPEG, PNG or WebP.")
@@ -179,8 +182,12 @@ async def store_photo(conn, upload, owner_type: str, owner_id: int, feature_id: 
         raise HTTPException(400, f"“{upload.filename}” could not be read as an image.")
     filename = secrets.token_hex(16) + ext
     (db.UPLOAD_DIR / filename).write_bytes(data)
+    return filename
+
+
+async def store_photo(conn, upload, owner_type: str, owner_id: int, feature_id: int | None = None) -> None:
     conn.execute("INSERT INTO photos (owner_type, owner_id, filename, feature_id) VALUES (?, ?, ?, ?)",
-                 (owner_type, owner_id, filename, feature_id))
+                 (owner_type, owner_id, await save_upload(upload), feature_id))
 
 
 async def save_photos(conn, form, owner_type: str, owner_id: int) -> None:
@@ -279,7 +286,8 @@ def logout():
 def home(request: Request):
     with db.session() as conn:
         zones = [dict(d) for d in disasters(conn)]
-    return render(request, "index.html", zones=zones)
+        appeals = public_appeals(conn, limit=6)
+    return render(request, "index.html", zones=zones, appeals=appeals)
 
 
 @app.get("/missing/new")
@@ -341,6 +349,18 @@ def _load_case(conn, ref: str, k: str):
     return row
 
 
+@app.get("/case/{ref}/photos/{pid}")
+def family_own_photo(ref: str, pid: int, k: str = ""):
+    """A family's own uploaded photo, so they can pick one for their public appeal."""
+    with db.session() as conn:
+        row = _load_case(conn, ref, k)
+        photo = conn.execute("SELECT filename FROM photos WHERE id=? AND owner_type='missing' AND owner_id=?",
+                             (pid, row["id"])).fetchone()
+    if not photo:
+        raise HTTPException(404)
+    return FileResponse(db.UPLOAD_DIR / photo["filename"], headers={"Cache-Control": "private, no-store"})
+
+
 @app.get("/case/{ref}")
 def case(request: Request, ref: str, k: str = "", new: int = 0):
     with db.session() as conn:
@@ -359,8 +379,13 @@ def case(request: Request, ref: str, k: str = "", new: int = 0):
                             "found_date": rec["found_date"], "score": m["score"],
                             "reasons": m["reasons"], "request_status": status})
         disaster = conn.execute("SELECT * FROM disasters WHERE id=?", (row["disaster_id"],)).fetchone()
+        own_photos = [r[0] for r in conn.execute(
+            "SELECT id FROM photos WHERE owner_type='missing' AND owner_id=? ORDER BY feature_id IS NOT NULL, id",
+            (row["id"],))]
         return render(request, "case.html", case=profile, matches=matches, k=k, new=new,
-                      disaster=disaster, photos=photo_count(conn, "missing", row["id"]))
+                      disaster=disaster, photos=len(own_photos), own_photos=own_photos,
+                      appeal_public=bool(row["appeal_public"]), appeal_photo_id=row["appeal_photo_id"],
+                      tips=tips_for(conn, row["id"], include_hidden=False))
 
 
 @app.post("/case/{ref}/verify/{found_ref}")
@@ -380,6 +405,151 @@ async def request_verification(request: Request, ref: str, found_ref: str):
         conn.execute("""INSERT OR IGNORE INTO verification_requests (missing_id, found_id, score)
                         VALUES (?, ?, ?)""", (row["id"], found["id"], match["score"]))
     return RedirectResponse(f"/case/{ref}?k={k}", status_code=303)
+
+
+# --- public appeals and community tips ---------------------------------------
+#
+# A family can publish a public appeal for their missing person: name, description and one
+# photo they choose. Anyone can send a sighting or tip from it. The family sees tips straight
+# away, marked unverified; responders can verify or hide them. Tipsters never see the
+# family's details, and their own contact is shown to responders only.
+
+TIP_CONDITIONS = {"well": "Seemed well", "needs_help": "Injured or needed help", "unsure": "Not sure"}
+MAX_TIP_PHOTOS = 4
+TIP_LIMIT, TIP_WINDOW = 5, 600  # tips per IP address per 10 minutes
+_recent_tips: dict[str, list[float]] = {}
+templates.env.globals["tip_conditions"] = TIP_CONDITIONS
+
+
+def _rate_limited(ip: str) -> bool:
+    now = time.time()
+    recent = [t for t in _recent_tips.get(ip, []) if now - t < TIP_WINDOW]
+    _recent_tips[ip] = recent
+    if len(recent) >= TIP_LIMIT:
+        return True
+    recent.append(now)
+    return False
+
+
+def _load_appeal(conn, ref: str):
+    row = conn.execute("SELECT * FROM missing_reports WHERE ref=? AND appeal_public=1", (ref,)).fetchone()
+    if not row:
+        raise HTTPException(404, "This appeal isn't available. The family may have taken it down.")
+    return row
+
+
+def tips_for(conn, missing_id: int, include_hidden: bool) -> list[dict]:
+    out = []
+    for r in conn.execute("SELECT * FROM tips WHERE missing_id=? ORDER BY id DESC", (missing_id,)):
+        if r["status"] == "hidden" and not include_hidden:
+            continue
+        tip = dict(r)
+        tip["photo_ids"] = [p[0] for p in conn.execute("SELECT id FROM tip_photos WHERE tip_id=? ORDER BY id", (r["id"],))]
+        out.append(tip)
+    return out
+
+
+def public_appeals(conn, disaster: int = 0, limit: int = 60) -> list[dict]:
+    rows = conn.execute("""SELECT m.ref, m.full_name, m.sex, m.age, m.last_seen_place, m.last_seen_date,
+                                  m.appeal_photo_id, d.name AS disaster
+                           FROM missing_reports m JOIN disasters d ON d.id = m.disaster_id
+                           WHERE m.appeal_public = 1 AND (? = 0 OR m.disaster_id = ?)
+                           ORDER BY m.id DESC LIMIT ?""", (disaster, disaster, limit))
+    return [dict(r) for r in rows]
+
+
+@app.post("/case/{ref}/appeal")
+async def update_appeal(request: Request, ref: str):
+    form = await request.form()
+    k = str(form.get("k", ""))
+    with db.session() as conn:
+        row = _load_case(conn, ref, k)
+        publish = form.get("publish") == "1"
+        photo_id = _int(form.get("photo_id"), 1, 10**9)
+        if photo_id and not conn.execute("SELECT 1 FROM photos WHERE id=? AND owner_type='missing' AND owner_id=?",
+                                          (photo_id, row["id"])).fetchone():
+            photo_id = None  # only one of this report's own photos can be made public
+        conn.execute("UPDATE missing_reports SET appeal_public=?, appeal_photo_id=? WHERE id=?",
+                     (1 if publish else 0, photo_id if publish else None, row["id"]))
+    return RedirectResponse(f"/case/{ref}?k={k}#appeal", status_code=303)
+
+
+@app.post("/case/{ref}/tips/{tid}/hide")
+async def family_hide_tip(request: Request, ref: str, tid: int):
+    k = str((await request.form()).get("k", ""))
+    with db.session() as conn:
+        row = _load_case(conn, ref, k)
+        conn.execute("UPDATE tips SET status='hidden', hidden_by='family' WHERE id=? AND missing_id=?", (tid, row["id"]))
+    return RedirectResponse(f"/case/{ref}?k={k}#tips", status_code=303)
+
+
+@app.get("/case/{ref}/tips/photos/{tpid}")
+def family_tip_photo(ref: str, tpid: int, k: str = ""):
+    with db.session() as conn:
+        row = _load_case(conn, ref, k)
+        photo = conn.execute("""SELECT p.filename FROM tip_photos p JOIN tips t ON t.id = p.tip_id
+                                WHERE p.id=? AND t.missing_id=? AND t.status != 'hidden'""", (tpid, row["id"])).fetchone()
+    if not photo:
+        raise HTTPException(404)
+    return FileResponse(db.UPLOAD_DIR / photo["filename"], headers={"Cache-Control": "private, no-store"})
+
+
+@app.get("/appeals")
+def appeals(request: Request, disaster: int = 0):
+    with db.session() as conn:
+        return render(request, "appeals.html", appeals=public_appeals(conn, disaster), zones=disasters(conn),
+                      selected=disaster)
+
+
+@app.get("/appeal/{ref}")
+def appeal(request: Request, ref: str, sent: int = 0):
+    with db.session() as conn:
+        row = _load_appeal(conn, ref)
+        profile = db.missing_profile(conn, row)
+        disaster = conn.execute("SELECT * FROM disasters WHERE id=?", (row["disaster_id"],)).fetchone()
+        zone = [dict(disaster)] if disaster["lat"] is not None else []
+    return render(request, "appeal.html", person=profile, disaster=disaster, zones=zone, sent=sent)
+
+
+@app.get("/appeal/{ref}/photo")
+def appeal_photo(ref: str):
+    with db.session() as conn:
+        row = _load_appeal(conn, ref)
+        photo = conn.execute("SELECT filename FROM photos WHERE id=? AND owner_type='missing' AND owner_id=?",
+                             (row["appeal_photo_id"], row["id"])).fetchone()
+    if not photo:
+        raise HTTPException(404)
+    return FileResponse(db.UPLOAD_DIR / photo["filename"], headers={"Cache-Control": "public, max-age=300"})
+
+
+@app.post("/appeal/{ref}/tips")
+async def create_tip(request: Request, ref: str):
+    form = await request.form()
+    if form.get("website"):  # honeypot: hidden from people, filled in by bots
+        return RedirectResponse(f"/appeal/{ref}?sent=1", status_code=303)
+    message = _text(form.get("message"), 2000)
+    if not message:
+        raise HTTPException(400, "Please describe what you saw.")
+    photos = [u for u in map(_upload, form.getlist("photos")) if u]
+    if len(photos) > MAX_TIP_PHOTOS:
+        raise HTTPException(400, f"Please send at most {MAX_TIP_PHOTOS} photos.")
+    if _rate_limited(request.client.host if request.client else "unknown"):
+        raise HTTPException(429, "You've sent several tips in a short time. Please wait a few minutes and try again.")
+    seen_at = _text(form.get("seen_at"), 16)
+    if seen_at and not re.fullmatch(r"\d{4}-\d{2}-\d{2}(T\d{2}:\d{2})?", seen_at):
+        seen_at = None
+    with db.session() as conn:
+        row = _load_appeal(conn, ref)
+        filenames = [await save_upload(u) for u in photos]  # validate every photo before saving the tip
+        cur = conn.execute(
+            """INSERT INTO tips (missing_id, seen_place, seen_lat, seen_lng, seen_at, condition, message, contact)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (row["id"], _text(form.get("seen_place"), 300), _float(form.get("lat"), -90, 90),
+             _float(form.get("lng"), -180, 180), seen_at, _choice(form.get("condition"), TIP_CONDITIONS),
+             message, _text(form.get("contact"), 200)))
+        conn.executemany("INSERT INTO tip_photos (tip_id, filename) VALUES (?, ?)",
+                         [(cur.lastrowid, f) for f in filenames])
+    return RedirectResponse(f"/appeal/{ref}?sent=1", status_code=303)
 
 
 # --- responders --------------------------------------------------------------
@@ -407,8 +577,15 @@ def dashboard(request: Request):
             FROM ai_matches a JOIN missing_reports m ON m.id = a.missing_id JOIN found_records f ON f.id = a.found_id
             WHERE a.verdict IN ('strong', 'possible') OR (a.stage = 'shortlisted' AND a.shortlist_score >= 60)
             ORDER BY a.verdict = 'strong' DESC, COALESCE(a.score, a.shortlist_score) DESC LIMIT 10""").fetchall()
+        new_tips = conn.execute("""
+            SELECT t.id, t.seen_place, t.seen_at, t.message, t.condition, t.created_at,
+                   m.ref AS missing_ref, m.full_name,
+                   (SELECT COUNT(*) FROM tip_photos p WHERE p.tip_id = t.id) AS photos
+            FROM tips t JOIN missing_reports m ON m.id = t.missing_id
+            WHERE t.status = 'unverified' ORDER BY t.id DESC LIMIT 10""").fetchall()
         return render(request, "dashboard.html", queue=queue, found=found, missing=missing,
-                      pending_zones=pending_zones, ai_flags=ai_flags, ai_enabled=ai_match.enabled())
+                      pending_zones=pending_zones, ai_flags=ai_flags, ai_enabled=ai_match.enabled(),
+                      new_tips=new_tips)
 
 
 @app.post("/responder/verifications/{vid}")
@@ -577,6 +754,7 @@ def missing_detail(request: Request, ref: str):
         matches = rank_found(profile, db.found_profiles(conn, row["disaster_id"]))
         feature_photos, photo_ids = _photo_ids(conn, "missing", row["id"])
         ai = _ai_context(conn, "missing", row["id"])
+        ai["tips"] = tips_for(conn, row["id"], include_hidden=True)
         _start_illustrations(request, conn, photo_ids + sum(feature_photos.values(), [])
                              + sum((a["other_photo_ids"] for a in ai["ai_results"]), []))
         return render(request, "record.html", kind="missing", record=profile, matches=matches,
@@ -622,6 +800,33 @@ def rerun_ai_check(request: Request, kind: str, ref: str, background: Background
 def _rerun(kind: str, record_id: int) -> None:
     ai_match.RUNNING.discard((kind, record_id))  # run_for skips records already marked running
     ai_match.run_for(kind, record_id, force=True)
+
+
+@app.post("/responder/tips/{tid}")
+async def moderate_tip(request: Request, tid: int):
+    require_responder(request)
+    action = _choice((await request.form()).get("action"), ("verify", "hide", "unhide"))
+    status = {"verify": "verified", "hide": "hidden", "unhide": "unverified"}.get(action)
+    if not status:
+        raise HTTPException(400)
+    with db.session() as conn:
+        tip = conn.execute("""SELECT m.ref FROM tips t JOIN missing_reports m ON m.id = t.missing_id
+                              WHERE t.id=?""", (tid,)).fetchone()
+        if not tip:
+            raise HTTPException(404)
+        conn.execute("UPDATE tips SET status=?, hidden_by=? WHERE id=?",
+                     (status, "responder" if status == "hidden" else None, tid))
+    return RedirectResponse(f"/responder/missing/{tip['ref']}#tips", status_code=303)
+
+
+@app.get("/responder/tips/photos/{tpid}")
+def responder_tip_photo(request: Request, tpid: int):
+    require_responder(request)
+    with db.session() as conn:
+        photo = conn.execute("SELECT filename FROM tip_photos WHERE id=?", (tpid,)).fetchone()
+    if not photo:
+        raise HTTPException(404)
+    return FileResponse(db.UPLOAD_DIR / photo["filename"], headers={"Cache-Control": "private, no-store"})
 
 
 @app.get("/responder/photos/{pid}")
