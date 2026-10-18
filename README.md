@@ -40,6 +40,22 @@ Anyone can send a **sighting** from an appeal: where and when (with an optional 
 - **Tipsters** never see the family's details, and tips are never shown publicly.
 - **Abuse protection:** a hidden honeypot field for bots, and at most 5 tips per IP address every 10 minutes (kept in memory, so it resets when the server restarts).
 
+## "I'm safe" check-ins
+
+At `/safe`, people in a disaster zone can mark themselves safe, along with anyone who is with them, such as children, parents or neighbours, with or without their own phones. They can add a message and, only if they choose, where they are. A private link lets them update or remove the check-in later.
+
+Relatives find someone with their **full name and a phone number** from that check-in, as with the Red Cross "Safe and Well" service. Matching rules are in [app/safe.py](app/safe.py):
+
+- Name words can be in any order and middle names are optional ("Thapa Sita" matches "Sita Kumari Thapa"). Any script works.
+- Phone numbers match on their last 9 digits, so `+977 980-1234567` matches `9801234567`.
+- A person in a group can be found with their own number or anyone else's number in that check-in.
+- Strangers can't browse who is safe. Searches are POSTed, so numbers never appear in URLs or logs, and they are rate-limited (20 per IP every 10 minutes) to stop number guessing.
+- Results show the message, and the place only if shared, never other group members' names.
+
+On the missing-person form, families can add the person's own phone number (kept private). If a matching check-in appears, their case page shows it. Responders see check-ins with similar names on each missing record, can browse and remove check-ins at `/responder/safe`, and see the number of people marked safe on the dashboard.
+
+Check-ins are self-reported and never close a missing-person report.
+
 ## How matching works
 
 All of the matching code is in [app/matching.py](app/matching.py). It is made of pure functions, so it is easy to tune and test.
@@ -83,6 +99,7 @@ app/templates/    server-rendered HTML (no JS framework)
 app/static/zones.js  zones map (Leaflet + OpenStreetMap tiles)
 app/gdacs.py      suggested zones from GDACS alerts
 app/ai_match.py   AI photo check: describe -> screen -> compare
+app/safe.py       "I'm safe" check-ins: name + phone matching
 app/sketch.py     exact pencil-sketch versions of photos
 app/illustrate.py colour illustrations of deceased people's photos (AI)
 tests/            matching unit tests + end-to-end privacy test

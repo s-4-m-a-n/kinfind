@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}Safe check-ins · {{ app_name }}{% endblock %}
+{% block content %}
+<p class="back"><a href="/responder">← Dashboard</a></p>
+<header class="page-head">
+  <h1>Safe check-ins</h1>
+  <p class="lede">People who marked themselves, or people with them, as safe. Self-reported. Remove anything fake or abusive.
+    Relatives can only find a check-in with a full name and phone number.</p>
+</header>
+
+<form method="get" action="/responder/safe" class="filter-row">
+  <label>Name <input name="q" value="{{ q }}" placeholder="Search by name"></label>
+  <label>Disaster
+    <select name="disaster"><option value="0">All</option>
+      {% for z in zones %}<option value="{{ z.id }}" {% if z.id == selected %}selected{% endif %}>{{ z.name }}</option>{% endfor %}
+    </select>
+  </label>
+  <button class="secondary">Filter</button>
+</form>
+
+{% if not checkins %}<p class="empty">No check-ins{{ ' match' if q or selected else ' yet' }}.</p>{% else %}
+<div class="table-wrap"><table>
+  <thead><tr><th>People</th><th>Message / place</th><th>Disaster</th><th>Updated</th><th></th></tr></thead>
+  <tbody>
+  {% for c in checkins %}
+    <tr class="{{ 'muted' if c.status == 'withdrawn' }}">
+      <td>{{ c.people }}{% if c.status == 'withdrawn' %}<br><small>Withdrawn by the person</small>{% endif %}</td>
+      <td>{{ c.message or '—' }}{% if c.place %}<br><small>{{ c.place }}{{ ' (shared)' if c.share_place else ' (not shared)' }}</small>{% endif %}</td>
+      <td>{{ c.disaster }}</td>
+      <td><small>{{ c.updated_at[:16] }}</small></td>
+      <td><form method="post" action="/responder/safe/{{ c.id }}/remove" class="inline"><button class="secondary danger">Remove</button></form></td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table></div>
+{% endif %}
+{% endblock %}

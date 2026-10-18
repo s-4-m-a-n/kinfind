@@ -15,6 +15,18 @@
 </div>
 {% endif %}
 
+{% if safe_checkins %}
+<div class="notice safe-notice" role="status">
+  {% for c in safe_checkins %}
+  <strong>Someone named {{ c.person }} with the phone number you gave marked themselves safe</strong>
+  <span>on {{ c.updated_at[:16] }} UTC · {{ c.disaster }}{% if c.group_size > 1 %}, together with {{ c.group_size - 1 }} other {{ 'person' if c.group_size == 2 else 'people' }}{% endif %}.</span>
+  {% if c.message %}<blockquote>{{ c.message }}</blockquote>{% endif %}
+  {% if c.share_place and c.place %}<span>Where: {{ c.place }}</span>{% endif %}
+  {% endfor %}
+  <small>This is self-reported and not checked by responders. Your report stays open until you're sure.</small>
+</div>
+{% endif %}
+
 <header class="page-head">
   <p class="eyebrow">Case {{ case.ref }} · {{ disaster.name }}, {{ disaster.region }}</p>
   <h1>Searching for {{ case.full_name }}</h1>

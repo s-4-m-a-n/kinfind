@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}Mark yourself safe · {{ app_name }}{% endblock %}
+{% block content %}
+<header class="page-head">
+  <h1>Mark yourself safe</h1>
+  <p class="lede">Your family can find this with your name and phone number. It takes a minute.
+    Fields marked <span class="req" aria-hidden="true">*</span> are required.</p>
+</header>
+
+<form method="post" action="/safe" class="stack">
+  <fieldset>
+    <legend><span class="step">1</span>Where you were affected</legend>
+    <label><span>Which disaster? <span class="req" aria-hidden="true">*</span></span>
+      <select name="disaster_id" required>
+        <option value="">Choose…</option>
+        {% for d in disasters %}<option value="{{ d.id }}" {% if d.id == selected %}selected{% endif %}>{{ d.name }} — {{ d.region }}</option>{% endfor %}
+      </select>
+    </label>
+  </fieldset>
+
+  <fieldset>
+    <legend><span class="step">2</span>You</legend>
+    <div class="grid">
+      <label><span>Your full name <span class="req" aria-hidden="true">*</span></span> <input name="name" required autocomplete="name"></label>
+      <label><span>Phone number your family knows <span class="req" aria-hidden="true">*</span></span>
+        <input name="phone" required inputmode="tel" autocomplete="tel"></label>
+    </div>
+    <p class="hint">If your phone is lost, use a number your family will search for, such as your usual number.</p>
+  </fieldset>
+
+  <fieldset>
+    <legend><span class="step">3</span>People with you <small>(optional)</small></legend>
+    <p class="hint">Children, parents, neighbours: anyone who is safe with you. Their family can find them with their name and
+      either their own number or yours.</p>
+    <div id="companions" class="companion-list">
+      {% for _ in range(2) %}{% include "_companion_row.html" %}{% endfor %}
+    </div>
+    <button type="button" class="secondary" data-add-row="companions" data-template="companion-row">+ Add another person</button>
+    <template id="companion-row">{% include "_companion_row.html" %}</template>
+  </fieldset>
+
+  <fieldset>
+    <legend><span class="step">4</span>Message for your family <small>(optional)</small></legend>
+    <label>Message <textarea name="message" rows="2" maxlength="500" placeholder="e.g. We're all fine. Phone is broken, will call when we can."></textarea></label>
+    <label>Where are you now? <input name="place" maxlength="200" placeholder="e.g. Syabrubesi school shelter"></label>
+    <label class="check"><input type="checkbox" name="share_place" value="1">
+      <span>Show where I am to people who find me. Only tick this if you're happy for anyone who knows your name and
+        number to see it.</span></label>
+    <label class="hp" aria-hidden="true">Website <input name="website" tabindex="-1" autocomplete="off"></label>
+  </fieldset>
+
+  <div class="submit-bar">
+    <p class="hint">You'll get a private link to update or remove this later.</p>
+    <button type="submit" data-busy="Saving…">I'm safe</button>
+  </div>
+</form>
+{% endblock %}

@@ -22,10 +22,12 @@
         <a href="/responder" {% if path == '/responder' %}aria-current="page"{% endif %}>Dashboard</a>
         <a href="/responder/found/new" {% if path == '/responder/found/new' %}aria-current="page"{% endif %}>Log found person</a>
         <a href="/responder/zones" {% if path == '/responder/zones' %}aria-current="page"{% endif %}>Zones</a>
+        <a href="/responder/safe" {% if path == '/responder/safe' %}aria-current="page"{% endif %}>Safe</a>
         <form method="post" action="/responder/logout"><button class="link">Sign out</button></form>
       {% else %}
         <a href="/missing/new" {% if path == '/missing/new' %}aria-current="page"{% endif %}>Report missing</a>
         <a href="/appeals" {% if path.startswith('/appeal') %}aria-current="page"{% endif %}>Have you seen them?</a>
+        <a href="/safe" class="nav-safe" {% if path.startswith('/safe') %}aria-current="page"{% endif %}>I'm safe</a>
         <a href="/responder/login" {% if path == '/responder/login' %}aria-current="page"{% endif %}>Responders</a>
       {% endif %}
     </nav>
@@ -135,7 +137,15 @@
         t.closest(".blurred").classList.remove("blurred");
         return t.remove();
       }
-      if (t.matches("[data-add-feature]")) {
+      if (t.matches("[data-add-row]")) {  // generic repeatable rows (e.g. people with you)
+        const list = document.getElementById(t.dataset.addRow);
+        list.appendChild(document.getElementById(t.dataset.template).content.cloneNode(true));
+        list.lastElementChild.querySelector("input").focus();
+      } else if (t.matches("[data-remove-row]")) {
+        const row = t.parentElement;
+        if (row.parentElement.children.length > 1) row.remove();
+        else row.querySelectorAll("input").forEach((i) => (i.value = ""));
+      } else if (t.matches("[data-add-feature]")) {
         const list = document.getElementById("features");
         list.appendChild(document.getElementById("feature-row").content.cloneNode(true));
         list.lastElementChild.querySelector("select").focus();

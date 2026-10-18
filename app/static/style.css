@@ -413,3 +413,29 @@ button.danger-solid, .button.danger-solid { background: var(--error); color: #ff
 .tip-photo .reveal { position: absolute; inset: 0; display: grid; place-content: center; gap: .2rem; background: rgb(0 0 0 / .45); color: #fff; font-size: .85rem; border-radius: 0; padding: .5rem; }
 .tip-photo .reveal small { font-weight: 400; font-size: .7rem; opacity: .9; }
 .tip-actions { display: flex; gap: .5rem; flex-wrap: wrap; }
+
+/* "I'm safe" check-ins */
+.safe-actions { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+.safe-card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 1.1rem 1.25rem; display: grid; gap: .6rem; align-content: start; box-shadow: var(--shadow); }
+.safe-card h2 { margin: 0; }
+.safe-card p { margin: 0; color: var(--muted); }
+.safe-me { border-color: var(--high); background: color-mix(in srgb, var(--high) 7%, var(--surface)); }
+.safe-me .button { justify-self: start; background: var(--high); color: #fff; }
+.safe-results { margin-top: 1.5rem; }
+.safe-list { list-style: none; padding: 0; margin: 0 0 .75rem; display: grid; gap: .6rem; }
+.safe-result { background: var(--surface); border: 1px solid var(--high); border-left-width: 4px; border-radius: var(--radius); padding: .9rem 1.1rem; display: grid; gap: .4rem; justify-items: start; }
+.safe-result p, .safe-notice blockquote, .safe-result blockquote { margin: 0; }
+.safe-result blockquote, .safe-notice blockquote { border-left: 3px solid var(--line); padding-left: .7rem; font-style: italic; }
+.safe-notice { border: 1px solid var(--high); background: var(--high-soft); }
+.companion-list { display: grid; gap: .5rem; }
+.companion-row { display: grid; grid-template-columns: 1.4fr 1fr 2rem; gap: .5rem; }
+@media (max-width: 520px) { .companion-row { grid-template-columns: 1fr 2rem; } .companion-row input:nth-child(2) { grid-column: 1; } }
+label.check { display: flex; gap: .55rem; align-items: flex-start; font-weight: 400; }
+label.check input { width: auto; min-height: 0; margin-top: .25rem; }
+.nav-safe { color: var(--high) !important; font-weight: 600; }
+.safe-cta { color: var(--high); border-color: var(--high); }
+.filter-row { display: flex; gap: .6rem; flex-wrap: wrap; align-items: end; margin-bottom: 1rem; }
+.filter-row label { min-width: 12rem; }
+.stats a span { color: var(--muted); font-size: .88rem; }
+.stats a strong { font-size: 1.6rem; line-height: 1.2; }
+.safe-people { margin-bottom: 1.5rem; }

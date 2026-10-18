@@ -40,6 +40,7 @@
     box.append(h, p);
     if (el.dataset.mode === "browse") {
       box.append(link("Report a missing person here", `/missing/new?disaster=${z.id}`, "button"));
+      box.append(link("I'm safe: tell my family", `/safe/new?disaster=${z.id}`));
       if (responder) box.append(link("Log a found person here", `/responder/found/new?disaster=${z.id}`));
     }
     return box;

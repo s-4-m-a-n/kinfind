@@ -79,6 +79,15 @@
 <div class="photos">{% for pid in photo_ids %}{{ ph.photo(pid, "Photo " ~ loop.index, own_sensitive) }}{% endfor %}</div>
 {% endif %}
 
+{% if kind == 'missing' and safe_similar %}
+<div class="notice safe-notice" role="status">
+  <strong>Safe check-ins with a similar name in this zone</strong>
+  <ul class="plain">{% for c in safe_similar %}<li>{{ c.full_name }}{% if c.phone %} · {{ c.phone }}{% endif %} · marked safe {{ c.updated_at[:16] }} UTC
+    {% if c.message %}— “{{ c.message }}”{% endif %}{% if c.place %} · {{ c.place }}{% endif %}</li>{% endfor %}</ul>
+  <small>Self-reported. Check with the family before closing anything. <a href="/responder/safe?q={{ r.full_name|urlencode }}">All check-ins →</a></small>
+</div>
+{% endif %}
+
 {% if kind == 'missing' %}
 <section id="tips">
   <h2>Community sightings {% if tips %}<span class="count">{{ tips|length }}</span>{% endif %}

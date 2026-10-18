@@ -38,7 +38,7 @@ def load_env_file(path: Path) -> None:
 
 load_env_file(Path(__file__).resolve().parent.parent / ".env")  # before anything reads os.environ
 
-from . import ai_match, db, gdacs, illustrate, sketch  # noqa: E402
+from . import ai_match, db, gdacs, illustrate, safe, sketch  # noqa: E402
 from .matching import BODY_LOCATIONS, FEATURE_KINDS, HAIR_COLORS, rank_found, rank_missing  # noqa: E402
 
 APP_DIR = Path(__file__).resolve().parent
@@ -327,15 +327,15 @@ async def create_missing(request: Request, background: BackgroundTasks):
         cur = conn.execute(
             """INSERT INTO missing_reports (ref, access_token, disaster_id, full_name, sex, age,
                    height_cm, hair_color, last_seen_place, last_seen_date, clothing, description,
-                   reporter_name, reporter_contact)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                   reporter_name, reporter_contact, person_phone)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (ref, token, disaster_id(conn, form), full_name,
              _choice(form.get("sex"), ("male", "female", "unknown")),
              _int(form.get("age"), 0, 120), _int(form.get("height_cm"), 40, 250),
              _choice(form.get("hair_color"), HAIR_COLORS),
              _text(form.get("last_seen_place"), 300), _text(form.get("last_seen_date"), 10),
              _text(form.get("clothing")), _text(form.get("description")),
-             reporter_name, reporter_contact))
+             reporter_name, reporter_contact, _text(form.get("person_phone"), 40)))
         await save_features(conn, parse_features(form), "missing", cur.lastrowid)
         await save_photos(conn, form, "missing", cur.lastrowid)
     background.add_task(ai_match.run_for, "missing", cur.lastrowid)  # no-op without an API key
@@ -385,6 +385,7 @@ def case(request: Request, ref: str, k: str = "", new: int = 0):
         return render(request, "case.html", case=profile, matches=matches, k=k, new=new,
                       disaster=disaster, photos=len(own_photos), own_photos=own_photos,
                       appeal_public=bool(row["appeal_public"]), appeal_photo_id=row["appeal_photo_id"],
+                      safe_checkins=safe.find(conn, row["full_name"], row["person_phone"]) if row["person_phone"] else [],
                       tips=tips_for(conn, row["id"], include_hidden=False))
 
 
@@ -416,16 +417,21 @@ async def request_verification(request: Request, ref: str, found_ref: str):
 
 TIP_CONDITIONS = {"well": "Seemed well", "needs_help": "Injured or needed help", "unsure": "Not sure"}
 MAX_TIP_PHOTOS = 4
-TIP_LIMIT, TIP_WINDOW = 5, 600  # tips per IP address per 10 minutes
-_recent_tips: dict[str, list[float]] = {}
+RATE_LIMITS = {  # (requests, seconds) per IP address. In memory: resets on restart.
+    "tip": (5, 600),
+    "checkin": (10, 600),
+    "safe_search": (20, 600),  # stops people guessing phone numbers to find someone
+}
+_recent_requests: dict[tuple[str, str], list[float]] = {}
 templates.env.globals["tip_conditions"] = TIP_CONDITIONS
 
 
-def _rate_limited(ip: str) -> bool:
-    now = time.time()
-    recent = [t for t in _recent_tips.get(ip, []) if now - t < TIP_WINDOW]
-    _recent_tips[ip] = recent
-    if len(recent) >= TIP_LIMIT:
+def _rate_limited(request: Request, bucket: str) -> bool:
+    limit, window = RATE_LIMITS[bucket]
+    key, now = (bucket, request.client.host if request.client else "unknown"), time.time()
+    recent = [t for t in _recent_requests.get(key, []) if now - t < window]
+    _recent_requests[key] = recent
+    if len(recent) >= limit:
         return True
     recent.append(now)
     return False
@@ -533,7 +539,7 @@ async def create_tip(request: Request, ref: str):
     photos = [u for u in map(_upload, form.getlist("photos")) if u]
     if len(photos) > MAX_TIP_PHOTOS:
         raise HTTPException(400, f"Please send at most {MAX_TIP_PHOTOS} photos.")
-    if _rate_limited(request.client.host if request.client else "unknown"):
+    if _rate_limited(request, "tip"):
         raise HTTPException(429, "You've sent several tips in a short time. Please wait a few minutes and try again.")
     seen_at = _text(form.get("seen_at"), 16)
     if seen_at and not re.fullmatch(r"\d{4}-\d{2}-\d{2}(T\d{2}:\d{2})?", seen_at):
@@ -550,6 +556,111 @@ async def create_tip(request: Request, ref: str):
         conn.executemany("INSERT INTO tip_photos (tip_id, filename) VALUES (?, ?)",
                          [(cur.lastrowid, f) for f in filenames])
     return RedirectResponse(f"/appeal/{ref}?sent=1", status_code=303)
+
+
+# --- "I'm safe" check-ins ------------------------------------------------------
+#
+# People in a disaster zone mark themselves (and people with them) safe. Relatives find them
+# with full name + phone number only; see app/safe.py for why. Searches are POSTed so phone
+# numbers stay out of URLs, browser history and server logs.
+
+MAX_COMPANIONS = 12
+
+
+def _parse_people(form) -> list[dict]:
+    """The person checking in, then the people with them. Names without a phone are fine (children)."""
+    people = []
+    rows = [(form.get("name"), form.get("phone"), True)] + [
+        (n, p, False) for n, p in zip(form.getlist("other_name"), form.getlist("other_phone"))]
+    for name, phone, me in rows:
+        name, phone = _text(name, 200), _text(phone, 40)
+        if name and safe.name_key(name):
+            people.append({"full_name": name, "name_key": safe.name_key(name), "phone": phone,
+                           "phone_key": safe.phone_key(phone), "is_reporter": int(me)})
+    return people
+
+
+def _load_checkin(conn, token: str):
+    row = conn.execute("SELECT * FROM checkins WHERE token=? AND status != 'removed'", (token,)).fetchone()
+    if not row:
+        raise HTTPException(404, "Check-in not found. Check the private link you were given.")
+    return row
+
+
+@app.get("/safe")
+def safe_home(request: Request, disaster: int = 0):
+    with db.session() as conn:
+        return render(request, "safe.html", zones=disasters(conn), selected=disaster, results=None, query={})
+
+
+@app.get("/safe/new")
+def safe_form(request: Request, disaster: int = 0):
+    with db.session() as conn:
+        return render(request, "safe_form.html", disasters=disasters(conn), selected=disaster)
+
+
+@app.post("/safe")
+async def create_checkin(request: Request):
+    form = await request.form()
+    if form.get("website"):  # honeypot for bots
+        return RedirectResponse("/safe", status_code=303)
+    people = _parse_people(form)
+    if not people or not people[0]["is_reporter"]:
+        raise HTTPException(400, "Please enter your full name.")
+    if not people[0]["phone_key"]:
+        raise HTTPException(400, "Please enter a phone number your family knows, so they can find you.")
+    if len(people) > MAX_COMPANIONS + 1:
+        raise HTTPException(400, f"You can list up to {MAX_COMPANIONS} people with you.")
+    if _rate_limited(request, "checkin"):
+        raise HTTPException(429, "Several check-ins were sent from here in a short time. Please wait a few minutes.")
+    token = secrets.token_urlsafe(24)
+    with db.session() as conn:
+        cur = conn.execute("INSERT INTO checkins (token, disaster_id, message, place, share_place) VALUES (?, ?, ?, ?, ?)",
+                           (token, disaster_id(conn, form), _text(form.get("message"), 500),
+                            _text(form.get("place"), 200), 1 if form.get("share_place") else 0))
+        conn.executemany("""INSERT INTO checkin_people (checkin_id, full_name, name_key, phone, phone_key, is_reporter)
+                            VALUES (:checkin_id, :full_name, :name_key, :phone, :phone_key, :is_reporter)""",
+                         [{**person, "checkin_id": cur.lastrowid} for person in people])
+    return RedirectResponse(f"/safe/c/{token}?new=1", status_code=303)
+
+
+@app.get("/safe/c/{token}")
+def manage_checkin(request: Request, token: str, new: int = 0):
+    with db.session() as conn:
+        row = _load_checkin(conn, token)
+        people = conn.execute("SELECT * FROM checkin_people WHERE checkin_id=? ORDER BY is_reporter DESC, id",
+                              (row["id"],)).fetchall()
+        disaster = conn.execute("SELECT * FROM disasters WHERE id=?", (row["disaster_id"],)).fetchone()
+    return render(request, "safe_manage.html", checkin=row, people=people, disaster=disaster, new=new)
+
+
+@app.post("/safe/c/{token}")
+async def update_checkin(request: Request, token: str):
+    form = await request.form()
+    action = _choice(form.get("action"), ("update", "withdraw", "restore"))
+    with db.session() as conn:
+        row = _load_checkin(conn, token)
+        if action == "update":
+            conn.execute("""UPDATE checkins SET message=?, place=?, share_place=?, updated_at=datetime('now')
+                            WHERE id=?""", (_text(form.get("message"), 500), _text(form.get("place"), 200),
+                                           1 if form.get("share_place") else 0, row["id"]))
+        elif action in ("withdraw", "restore"):
+            conn.execute("UPDATE checkins SET status=?, updated_at=datetime('now') WHERE id=?",
+                         ("withdrawn" if action == "withdraw" else "active", row["id"]))
+    return RedirectResponse(f"/safe/c/{token}", status_code=303)
+
+
+@app.post("/safe/find")
+async def find_safe(request: Request):
+    form = await request.form()
+    query = {"name": _text(form.get("name"), 200) or "", "phone": _text(form.get("phone"), 40) or ""}
+    if not query["name"] or not safe.phone_key(query["phone"]):
+        raise HTTPException(400, "Enter the person's full name and their phone number.")
+    if _rate_limited(request, "safe_search"):
+        raise HTTPException(429, "Too many searches from here in a short time. Please wait a few minutes.")
+    with db.session() as conn:
+        results = safe.find(conn, query["name"], query["phone"])
+        return render(request, "safe.html", zones=disasters(conn), selected=0, results=results, query=query)
 
 
 # --- responders --------------------------------------------------------------
@@ -577,6 +688,8 @@ def dashboard(request: Request):
             FROM ai_matches a JOIN missing_reports m ON m.id = a.missing_id JOIN found_records f ON f.id = a.found_id
             WHERE a.verdict IN ('strong', 'possible') OR (a.stage = 'shortlisted' AND a.shortlist_score >= 60)
             ORDER BY a.verdict = 'strong' DESC, COALESCE(a.score, a.shortlist_score) DESC LIMIT 10""").fetchall()
+        safe_count = conn.execute("""SELECT COUNT(*) FROM checkin_people p JOIN checkins c ON c.id = p.checkin_id
+                                      WHERE c.status = 'active'""").fetchone()[0]
         new_tips = conn.execute("""
             SELECT t.id, t.seen_place, t.seen_at, t.message, t.condition, t.created_at,
                    m.ref AS missing_ref, m.full_name,
@@ -585,7 +698,7 @@ def dashboard(request: Request):
             WHERE t.status = 'unverified' ORDER BY t.id DESC LIMIT 10""").fetchall()
         return render(request, "dashboard.html", queue=queue, found=found, missing=missing,
                       pending_zones=pending_zones, ai_flags=ai_flags, ai_enabled=ai_match.enabled(),
-                      new_tips=new_tips)
+                      new_tips=new_tips, safe_count=safe_count)
 
 
 @app.post("/responder/verifications/{vid}")
@@ -755,6 +868,7 @@ def missing_detail(request: Request, ref: str):
         feature_photos, photo_ids = _photo_ids(conn, "missing", row["id"])
         ai = _ai_context(conn, "missing", row["id"])
         ai["tips"] = tips_for(conn, row["id"], include_hidden=True)
+        ai["safe_similar"] = safe.similar_names(conn, row["full_name"], row["disaster_id"])
         _start_illustrations(request, conn, photo_ids + sum(feature_photos.values(), [])
                              + sum((a["other_photo_ids"] for a in ai["ai_results"]), []))
         return render(request, "record.html", kind="missing", record=profile, matches=matches,
@@ -800,6 +914,33 @@ def rerun_ai_check(request: Request, kind: str, ref: str, background: Background
 def _rerun(kind: str, record_id: int) -> None:
     ai_match.RUNNING.discard((kind, record_id))  # run_for skips records already marked running
     ai_match.run_for(kind, record_id, force=True)
+
+
+@app.get("/responder/safe")
+def responder_checkins(request: Request, disaster: int = 0, q: str = ""):
+    require_responder(request)
+    with db.session() as conn:
+        rows = conn.execute("""
+            SELECT c.*, d.name AS disaster,
+                   (SELECT group_concat(full_name || COALESCE(' (' || phone || ')', ''), ', ')
+                    FROM checkin_people p WHERE p.checkin_id = c.id) AS people
+            FROM checkins c JOIN disasters d ON d.id = c.disaster_id
+            WHERE c.status != 'removed' AND (? = 0 OR c.disaster_id = ?)
+            ORDER BY c.updated_at DESC LIMIT 200""", (disaster, disaster)).fetchall()
+        if q:
+            key = safe.name_key(q)
+            keep = {r["checkin_id"] for r in conn.execute("SELECT checkin_id, name_key FROM checkin_people")
+                    if safe.names_match(key, r["name_key"]) or set(key.split()) & set(r["name_key"].split())}
+            rows = [r for r in rows if r["id"] in keep]
+        return render(request, "responder_safe.html", checkins=rows, zones=disasters(conn), selected=disaster, q=q)
+
+
+@app.post("/responder/safe/{cid}/remove")
+def remove_checkin(request: Request, cid: int):
+    require_responder(request)
+    with db.session() as conn:
+        conn.execute("UPDATE checkins SET status='removed', updated_at=datetime('now') WHERE id=?", (cid,))
+    return RedirectResponse("/responder/safe", status_code=303)
 
 
 @app.post("/responder/tips/{tid}")

@@ -38,6 +38,7 @@ CREATE TABLE IF NOT EXISTS missing_reports (
     last_seen_place TEXT, last_seen_date TEXT,
     clothing TEXT, description TEXT,
     reporter_name TEXT NOT NULL, reporter_contact TEXT NOT NULL,
+    person_phone TEXT,  -- the missing person's own number: private, used to spot an "I'm safe" check-in
     -- Public appeal: the family chooses to publish a "have you seen this person?" page.
     appeal_public INTEGER NOT NULL DEFAULT 0,
     appeal_photo_id INTEGER REFERENCES photos(id),  -- the one photo shown publicly
@@ -112,6 +113,28 @@ CREATE TABLE IF NOT EXISTS tip_photos (
     filename TEXT NOT NULL
 );
 
+-- "I'm safe" check-ins (app/safe.py). Found only by full name + a phone number in the
+-- check-in. `token` is the private link for updating or withdrawing it.
+CREATE TABLE IF NOT EXISTS checkins (
+    id INTEGER PRIMARY KEY,
+    token TEXT UNIQUE NOT NULL,
+    disaster_id INTEGER NOT NULL REFERENCES disasters(id),
+    message TEXT,
+    place TEXT, share_place INTEGER NOT NULL DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'withdrawn', 'removed')),
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS checkin_people (
+    id INTEGER PRIMARY KEY,
+    checkin_id INTEGER NOT NULL REFERENCES checkins(id),
+    full_name TEXT NOT NULL, name_key TEXT NOT NULL,
+    phone TEXT, phone_key TEXT,
+    is_reporter INTEGER NOT NULL DEFAULT 0  -- the person who made the check-in
+);
+CREATE INDEX IF NOT EXISTS checkin_people_phone ON checkin_people(phone_key);
+
 -- A family asking responders to check a suggested match. Responders contact
 -- the family; families never get facility or contact details directly.
 CREATE TABLE IF NOT EXISTS verification_requests (
@@ -143,6 +166,7 @@ MIGRATIONS = [
     ("features", "ai_description", "TEXT"),
     ("missing_reports", "appeal_public", "INTEGER NOT NULL DEFAULT 0"),
     ("missing_reports", "appeal_photo_id", "INTEGER"),
+    ("missing_reports", "person_phone", "TEXT"),
     ("ai_matches", "stage", "TEXT"),
     ("ai_matches", "shortlist_score", "INTEGER"),
     ("ai_matches", "shortlist_reason", "TEXT"),

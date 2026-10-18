@@ -39,6 +39,9 @@
         <select name="hair_color"><option value="">Unknown</option>{% for h in hair_colors %}<option value="{{ h }}">{{ h|capitalize }}</option>{% endfor %}</select>
       </label>
     </div>
+    <label>Their phone number <small>(optional)</small>
+      <input name="person_phone" inputmode="tel" autocomplete="off">
+      <span class="hint">Private. If they mark themselves safe on {{ app_name }} with this number, we'll show it on your case page.</span></label>
     <div class="grid">
       <label>Last seen at <input name="last_seen_place" placeholder="Village, street, landmark"></label>
       <label>Last seen on <input name="last_seen_date" type="date"></label>

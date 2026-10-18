@@ -10,7 +10,8 @@
     description with people found and recorded by responders in the same disaster area.</p>
   <div class="actions">
     <a class="button large" href="/missing/new">Report a missing person</a>
-    <span class="hint">Free · about 5 minutes · no account needed</span>
+    <a class="button large secondary safe-cta" href="/safe">I'm safe / find someone safe</a>
+    <span class="hint">Free · no account needed</span>
   </div>
 </section>
 
@@ -40,6 +41,7 @@
       <div class="zone-actions">
         {% if z.lat is not none %}<button type="button" class="link" data-show-zone="{{ z.id }}">Show on map</button>{% endif %}
         <a class="button small" href="/missing/new?disaster={{ z.id }}">Report missing</a>
+        <a class="button small secondary" href="/safe/new?disaster={{ z.id }}">I'm safe</a>
         {% if is_responder %}<a class="button small secondary" href="/responder/found/new?disaster={{ z.id }}">Log found</a>{% endif %}
       </div>
     </li>

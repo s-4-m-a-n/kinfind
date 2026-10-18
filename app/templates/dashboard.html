@@ -14,6 +14,7 @@
   <div class="{{ 'attention' if open_count }}"><strong>{{ open_count }}</strong><span>open verification request{{ '' if open_count == 1 else 's' }}</span></div>
   <div><strong>{{ found|length }}{{ '+' if found|length == 50 }}</strong><span>found records</span></div>
   <div><strong>{{ missing|length }}{{ '+' if missing|length == 50 }}</strong><span>missing reports</span></div>
+  <a href="/responder/safe"><strong>{{ safe_count }}</strong><span>{{ 'person' if safe_count == 1 else 'people' }} marked safe →</span></a>
   <a href="/responder/zones" class="{{ 'attention' if pending_zones }}"><strong>{{ pending_zones }}</strong><span>zone{{ '' if pending_zones == 1 else 's' }} awaiting review →</span></a>
 </div>
 

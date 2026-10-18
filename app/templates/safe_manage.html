@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}Your safe check-in · {{ app_name }}{% endblock %}
+{% block content %}
+{% set link = request.url.remove_query_params('new') %}
+{% if new %}
+<div class="notice" role="status">
+  <strong>You're marked safe.</strong>
+  <span>Keep this private link to update or remove your check-in later.</span>
+  <div class="copy-row">
+    <input id="checkin-link" class="copy" readonly value="{{ link }}" onclick="this.select()" aria-label="Private check-in link">
+    <button type="button" class="secondary" data-copy="checkin-link">Copy link</button>
+  </div>
+</div>
+{% endif %}
+
+<header class="page-head">
+  <p class="eyebrow">{{ disaster.name }} · {{ disaster.region }}</p>
+  <h1>{% if checkin.status == 'active' %}Marked safe{% else %}Check-in removed{% endif %}</h1>
+  <p class="meta">Last updated {{ checkin.updated_at[:16] }} UTC</p>
+</header>
+
+<section>
+  <h2>Who can be found</h2>
+  <p class="hint">Relatives can find each person with their full name and {{ 'any of these phone numbers' if people|selectattr('phone')|list|length > 1 else 'this phone number' }}.</p>
+  <ul class="plain safe-people">
+    {% for p in people %}<li><strong>{{ p.full_name }}</strong>{% if p.phone %} · {{ p.phone }}{% endif %}{% if p.is_reporter %} <span class="pill">You</span>{% endif %}</li>{% endfor %}
+  </ul>
+</section>
+
+{% if checkin.status == 'active' %}
+<form method="post" action="/safe/c/{{ checkin.token }}" class="stack">
+  <fieldset>
+    <legend>Update your message</legend>
+    <label>Message <textarea name="message" rows="2" maxlength="500">{{ checkin.message or '' }}</textarea></label>
+    <label>Where are you now? <input name="place" maxlength="200" value="{{ checkin.place or '' }}"></label>
+    <label class="check"><input type="checkbox" name="share_place" value="1" {% if checkin.share_place %}checked{% endif %}>
+      <span>Show where I am to people who find me.</span></label>
+    <div class="actions">
+      <button name="action" value="update">Save changes</button>
+      <button name="action" value="withdraw" class="secondary danger">Remove my check-in</button>
+    </div>
+  </fieldset>
+</form>
+{% else %}
+<form method="post" action="/safe/c/{{ checkin.token }}" class="inline">
+  <p>Relatives can no longer find this check-in.</p>
+  <button name="action" value="restore" class="secondary">Mark safe again</button>
+</form>
+{% endif %}
+{% endblock %}

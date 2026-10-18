@@ -33,7 +33,7 @@ def _report(client, name, contact):
 
 
 def test_appeal_and_tips_flow():
-    main._recent_tips.clear()
+    main._recent_requests.clear()
     with TestClient(app) as client:
         seed.run()
         ref, k = _report(client, "Nima Lama", "family-phone-555")
@@ -109,7 +109,7 @@ def test_appeal_and_tips_flow():
 
 
 def test_tip_abuse_limits():
-    main._recent_tips.clear()
+    main._recent_requests.clear()
     with TestClient(app) as client:
         seed.run()
         ref, k = _report(client, "Rate Limit", "x")

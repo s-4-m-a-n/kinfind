@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}I'm safe · {{ app_name }}{% endblock %}
+{% block content %}
+<header class="page-head">
+  <p class="eyebrow">After a disaster</p>
+  <h1>Tell your family you're safe, or find out if someone is</h1>
+</header>
+
+<div class="safe-actions">
+  <section class="safe-card safe-me">
+    <h2>I'm safe</h2>
+    <p>Let relatives know you, and anyone with you, are safe. They can find you with your name and phone number.
+      Nobody else can browse who is safe.</p>
+    <a class="button large" href="/safe/new{{ '?disaster=' ~ selected if selected else '' }}">Mark myself safe</a>
+  </section>
+
+  <section class="safe-card" id="find">
+    <h2>Find someone</h2>
+    <p class="hint">Enter their full name and a phone number they might have used. Both are needed, to protect people's safety.</p>
+    <form method="post" action="/safe/find" class="stack">
+      <label>Their full name <input name="name" required autocomplete="off" value="{{ query.name or '' }}"></label>
+      <label>Their phone number <input name="phone" required inputmode="tel" autocomplete="off" value="{{ query.phone or '' }}"></label>
+      <button type="submit" class="secondary">Search</button>
+    </form>
+  </section>
+</div>
+
+{% if results is not none %}
+<section class="safe-results" aria-live="polite">
+  {% if results %}
+  <h2>{{ results[0].person }} has checked in as safe</h2>
+  <ul class="safe-list">
+    {% for c in results %}
+    <li class="safe-result">
+      <span class="pill strong">Marked safe</span>
+      <p><strong>{{ c.person }}</strong> was marked safe on {{ c.updated_at[:16] }} UTC · {{ c.disaster }}
+        {% if c.group_size > 1 %}<br><small>Checked in together with {{ c.group_size - 1 }} other {{ 'person' if c.group_size == 2 else 'people' }}.</small>{% endif %}</p>
+      {% if c.message %}<blockquote>{{ c.message }}</blockquote>{% endif %}
+      {% if c.share_place and c.place %}<p class="meta">Where: {{ c.place }}</p>{% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+  <p class="hint">This is self-reported and has not been checked by responders.</p>
+  {% else %}
+  <h2>No check-in found</h2>
+  <p>Nobody has checked in as safe with that name and phone number. <strong>That doesn't mean they aren't safe:</strong>
+    many people can't check in because phones and networks are down, or they used a different number.</p>
+  <p><a href="/missing/new">Report them missing</a> so responders can look for them, and search again later.</p>
+  {% endif %}
+</section>
+{% endif %}
+{% endblock %}
